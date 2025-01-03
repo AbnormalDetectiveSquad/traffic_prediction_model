@@ -29,44 +29,23 @@
 
 *   **하드웨어:**
     *   그래픽 카드: RTX 4090 또는 RTX 4070 Ti
-*   **OS:** Ubuntu 22.04 / 24.04 (Ubuntu 24.04에서는 CUDA 12.4 강제 설치 후 진행)
+*   **OS:** Ubuntu 24.04 (CUDA 12.4 강제 설치 후 진행)
 *   **드라이버 버전:** NVIDIA-SMI 550.120 Driver Version: 550.120 CUDA Version: 12.4
 *   **CUDA:** 12.4 ([CUDA 12.4 다운로드](https://developer.nvidia.com/cuda-12-4-0-download-archive?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=22.04&target_type=deb_local))
 *   **cuDNN:**
     *   Ubuntu 22.04: [cuDNN for Ubuntu 22.04](https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=22.04&target_type=deb_local)
     *   Ubuntu 24.04: [cuDNN for Ubuntu 24.04](https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=24.04&target_type=deb_local)
-*   **Python:** 3.x
-*   **PyTorch, torchvision, torchaudio:** `pip3 install torch torchvision torchaudio` (CUDA 12.4 버전용 PyTorch 사용)
-*   **PyTorch 관련:**
-    *   `torch==2.5.1`
-    *   `torchvision==0.20.1`
-    *   `torchaudio==2.5.1`
-*   **NVIDIA CUDA 관련 (CUDA 12):**
-    *   `nvidia-cublas-cu12==12.4.5.8`
-    *   `nvidia-cuda-cupti-cu12==12.4.127`
-    *   `nvidia-cuda-nvrtc-cu12==12.4.127`
-    *   `nvidia-cuda-runtime-cu12==12.4.127`
-    *   `nvidia-cudnn-cu12==9.1.0.70`
-    *   `nvidia-cufft-cu12==11.2.1.3`
-    *   `nvidia-curand-cu12==10.3.5.147`
-    *   `nvidia-cusolver-cu12==11.6.1.9`
-    *   `nvidia-cusparse-cu12==12.3.1.170`
-    *   `nvidia-nccl-cu12==2.21.5`
-    *   `nvidia-nvjitlink-cu12==12.4.127`
-    *   `nvidia-nvtx-cu12==12.4.127`
-*   **수학 및 과학 연산:**
-    *   `numpy==2.2.1`
-    *   `sympy==1.13.1`
-    *   `mpmath==1.3.0`
-*   **네트워크 분석:**
-    *   `networkx==3.4.2`
-*   **이미지 처리:**
-    *   `pillow==11.1.0`
-*   **기타:**
-    *   `filelock==3.16.1`
-    *   `fsspec==2024.12.0`
-    *   `Jinja2==3.1.5`
-    *   `MarkupSafe==3.0.2`
-    *   `setuptools==75.6.0`
-    *   `triton==3.1.0`
-    *   `typing_extensions==4.12.2`
+## 주요 사용 기술 및 라이브러리
+
+*   **Python:** 3.12
+*   **PyTorch 생태계 (GPU 지원):**
+    *   `torch==2.5.1` 
+    *   `torchvision==0.20.1` 
+    *   `torchaudio==2.5.1` 
+    *   `torch-geometric==2.6.1` (그래프 신경망 관련 기능 제공)
+    *   CUDA 12 관련 라이브러리 (GPU 가속을 위한 NVIDIA 라이브러리. CUDA 12 환경에서 PyTorch 사용 시 필요)
+*   **핵심 과학/수학 라이브러리:**
+    *   `numpy==2.2.1` (수치 계산의 기본)
+    *   `scipy==1.14.1` (과학 및 공학 계산)
+*   **그래프 분석:**
+    *   `networkx==3.4.2` 
