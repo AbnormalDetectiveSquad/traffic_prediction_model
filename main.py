@@ -9,7 +9,7 @@ import tqdm
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
-
+import csv
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -202,6 +202,43 @@ def test(zscore, loss, model, test_iter, args):
     test_MSE = utility.evaluate_model(model, loss, test_iter)
     test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
+def test2(zscore, loss, model, test_iter, args):
+    # Load the model weights
+    model.load_state_dict(torch.load("STGCN_" + args.dataset + ".pt"))
+    model.eval()
+
+    # Evaluate the model
+    test_MSE = utility.evaluate_model(model, loss, test_iter)
+    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
+
+    # Prepare CSV output
+    output_file = f"test_results_{args.dataset}.csv"
+    with open(output_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Ground Truth", "Prediction"])
+
+        # 저장할 배치 수 제한
+        max_batches = 3  # 저장할 배치 개수
+        for i, batch in enumerate(test_iter):
+            if i >= max_batches:
+                break  # 최대 배치 수만 저장
+
+            inputs, ground_truth = batch
+            inputs, ground_truth = inputs.to(device), ground_truth.to(device)
+
+            with torch.no_grad():
+                predictions = model(inputs).view(len(inputs), -1)
+
+            # Denormalize if needed (apply zscore reverse transformation)
+            ground_truth = zscore.inverse_transform(ground_truth.cpu().numpy())
+            predictions = zscore.inverse_transform(predictions.cpu().numpy())
+
+            # 각 샘플별로 데이터 정렬
+            for gt, pred in zip(ground_truth.flatten(), predictions.flatten()):
+                writer.writerow([f"{gt:.6f}", f"{pred:.6f}"])
+
+    print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
+    print(f"Test results saved to {output_file}")
 
 if __name__ == "__main__":
     # Logging
@@ -216,5 +253,6 @@ if __name__ == "__main__":
     args.dataset = 'seoul'
     n_vertex, zscore, train_iter, val_iter, test_iter = data_preparate(args, device)
     loss, es, model, optimizer, scheduler = prepare_model(args, blocks, n_vertex)
-    train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)
-    test(zscore, loss, model, test_iter, args)
+    train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)# 모델평가만 원할때 추석처리
+    test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
+    #test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용
