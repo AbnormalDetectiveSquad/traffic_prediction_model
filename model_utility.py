@@ -148,12 +148,11 @@ def generate_random_data(num_nodes, num_features, num_hot_vectors, time_steps):
     """edge_index를 생성하도록 수정."""
     features = torch.randn(time_steps, num_nodes, num_features, dtype=torch.float16).permute(1,2,0)
     # 인접 행렬 생성 (필요한 경우)
-    edge_index = torch.randint(0, 2, (num_nodes, num_nodes), dtype=torch.float16)
-    for i in range(num_nodes):
-        edge_index[i, i] = 1
-
+    adj_matrix = torch.randint(0, 2, (num_nodes, num_nodes), dtype=torch.float16)
+    adj_matrix.fill_diagonal_(1)
     # edge_index 생성
-    edge_index = utils.dense_to_sparse(edge_index)[0].long()
+    edge_index = utils.dense_to_sparse(adj_matrix)[0].long()
+    assert edge_index.max() < num_nodes, f"Edge index max ({edge_index.max()}) >= num_nodes ({num_nodes})"
     hot_vector = torch.randint(0, 2, (time_steps, num_nodes, num_hot_vectors), dtype=torch.float16).permute(1,2,0)
     return {'features': features, 'edge_index': edge_index, 'hot_vector': hot_vector}
 if __name__ == "__main__":                                  #테스트 용 임시 메인 코드 정의 유틸리티파일은 다른 파일에서 불러와 사용
