@@ -40,7 +40,7 @@ def get_parameters():
     parser = argparse.ArgumentParser(description='STGCN')
     parser.add_argument('--enable_cuda', type=bool, default=True, help='enable CUDA, default as True')
     parser.add_argument('--seed', type=int, default=42, help='set the random seed for stabilizing experiment results')
-    parser.add_argument('--dataset', type=str, default='metr-la', choices=['metr-la', 'pems-bay', 'pemsd7-m'])
+    parser.add_argument('--dataset', type=str, default='metr-la', choices=['metr-la', 'pems-bay', 'pemsd7-m','seoul'])
     parser.add_argument('--n_his', type=int, default=12)
     parser.add_argument('--n_pred', type=int, default=3, help='the number of time interval for predcition, default as 3')
     parser.add_argument('--time_intvl', type=int, default=5)
@@ -101,17 +101,19 @@ def data_preparate(args, device):
     gso = gso.toarray()
     gso = gso.astype(dtype=np.float32)
     args.gso = torch.from_numpy(gso).to(device)
-
+    #args.dataset = 'metr-la'
     dataset_path = './data'
+   # if args.dataset != 'seoul':
     dataset_path = os.path.join(dataset_path, args.dataset)
     data_col = pd.read_csv(os.path.join(dataset_path, 'vel.csv')).shape[0]
     # recommended dataset split rate as train: val: test = 60: 20: 20, 70: 15: 15 or 80: 10: 10
     # using dataset split rate as train: val: test = 70: 15: 15
     val_and_test_rate = 0.15
-
     len_val = int(math.floor(data_col * val_and_test_rate))
     len_test = int(math.floor(data_col * val_and_test_rate))
     len_train = int(data_col - len_val - len_test)
+    #else:
+
 
     train, val, test = dataloader.load_data(args.dataset, len_train, len_val)
     zscore = preprocessing.StandardScaler()
@@ -211,6 +213,7 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=UserWarning)
 
     args, device, blocks = get_parameters()
+    args.dataset = 'seoul'
     n_vertex, zscore, train_iter, val_iter, test_iter = data_preparate(args, device)
     loss, es, model, optimizer, scheduler = prepare_model(args, blocks, n_vertex)
     train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)
