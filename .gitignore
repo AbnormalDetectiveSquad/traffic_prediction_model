@@ -4,6 +4,7 @@ __pycache__/
 .vscode/
 *.code-workspace
 /data
+<<<<<<< HEAD
 *.pth
 *.log
 *.cpg
@@ -11,3 +12,6 @@ __pycache__/
 *.prj
 *.shp
 *.shx
+=======
+*.pt
+>>>>>>> cd61420 (gitignore 에 모델가중치 파일 추가)
