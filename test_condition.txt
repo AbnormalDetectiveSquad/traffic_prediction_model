@@ -1,0 +1,4 @@
+selected_sigs = ['서울특별시 종로구', '서울특별시 중구', '서울특별시 용산구', '서울특별시 성동구']
+option='non-holidays'
+file=get_files_list(120)
+max_batches = 3  # 저장할 배치 개수

@@ -4,3 +4,10 @@ __pycache__/
 .vscode/
 *.code-workspace
 /data
+*.pth
+*.log
+*.cpg
+*.dbf
+*.prj
+*.shp
+*.shx

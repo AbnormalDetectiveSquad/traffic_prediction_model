@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils as utils
-
+import csv
 from script import dataloader, utility, earlystopping, opt
 from model import models
 
@@ -240,6 +240,38 @@ def test2(zscore, loss, model, test_iter, args):
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
     print(f"Test results saved to {output_file}")
 
+    # Evaluate the model
+    test_MSE = utility.evaluate_model(model, loss, test_iter)
+    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
+
+    # Prepare CSV output
+    output_file = f"test_results_{args.dataset}.csv"
+    with open(output_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Ground Truth", "Prediction"])
+
+        # 저장할 배치 수 제한
+        max_batches = 3  # 저장할 배치 개수
+        for i, batch in enumerate(test_iter):
+            if i >= max_batches:
+                break  # 최대 배치 수만 저장
+
+            inputs, ground_truth = batch
+            inputs, ground_truth = inputs.to(device), ground_truth.to(device)
+
+            with torch.no_grad():
+                predictions = model(inputs).view(len(inputs), -1)
+
+            # Denormalize if needed (apply zscore reverse transformation)
+            ground_truth = zscore.inverse_transform(ground_truth.cpu().numpy())
+            predictions = zscore.inverse_transform(predictions.cpu().numpy())
+
+            # 각 샘플별로 데이터 정렬
+            for gt, pred in zip(ground_truth.flatten(), predictions.flatten()):
+                writer.writerow([f"{gt:.6f}", f"{pred:.6f}"])
+
+    print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
+    print(f"Test results saved to {output_file}")
 if __name__ == "__main__":
     # Logging
     #logger = logging.getLogger('stgcn')
