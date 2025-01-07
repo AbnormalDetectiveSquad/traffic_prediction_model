@@ -51,15 +51,16 @@ def get_parameters():
     parser.add_argument('--graph_conv_type', type=str, default='cheb_graph_conv', choices=['cheb_graph_conv', 'graph_conv'])
     parser.add_argument('--gso_type', type=str, default='sym_norm_lap', choices=['sym_norm_lap', 'rw_norm_lap', 'sym_renorm_adj', 'rw_renorm_adj'])
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
-    parser.add_argument('--droprate', type=float, default=0.5)
-    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
+    parser.add_argument('--droprate', type=float, default=0.38)
+    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
     parser.add_argument('--weight_decay_rate', type=float, default=0.001, help='weight decay (L2 penalty)')
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
-    parser.add_argument('--step_size', type=int, default=10)
-    parser.add_argument('--gamma', type=float, default=0.95)
+    parser.add_argument('--step_size', type=int, default=8)
+    parser.add_argument('--gamma', type=float, default=0.85)
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
+    parser.add_argument('--complexity', type=int, default=8, help='number of bottleneck chnnal | in paper value is 16')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -83,12 +84,13 @@ def get_parameters():
     # using the bottleneck design in st_conv_blocks
     blocks = []
     blocks.append([1])
+    n=args.complexity
     for l in range(args.stblock_num):
-        blocks.append([64, 16, 64])
+        blocks.append([int(n*2), int(n), int(n*2)])
     if Ko == 0:
-        blocks.append([128])
+        blocks.append([int(n*8)])
     elif Ko > 0:
-        blocks.append([128, 128])
+        blocks.append([int(n*8), int(n*8)])
     blocks.append([1])
     
     return args, device, blocks

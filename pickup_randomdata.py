@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from script import dataloader
 import geopandas as gpd
+from tqdm import tqdm
 def validate_and_create_pivot_table(combined_data):
     # 중복 데이터 확인
     duplicates = combined_data.duplicated(subset=['Date', 'Time', 'Link_ID'], keep=False)
@@ -73,7 +74,7 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     all_data = []
 
     # 파일 리스트 순회
-    for f in file:
+    for f in tqdm(file,desc=f'Loding data from {data_dir}'):
         file_path = os.path.join(data_dir, f)
         
         # 파일 로드
@@ -106,7 +107,7 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     #)
     
     # 누락된 링크 ID를 추가하고 0으로 채우기
-    for link_id in link_order:
+    for link_id in tqdm(link_order ,desc='Remove missing links'):
         if link_id not in pivot_data.columns:
             pivot_data[link_id] = 0  # 없는 링크 ID는 0으로 채움
 
