@@ -51,7 +51,7 @@ def get_parameters():
     parser.add_argument('--graph_conv_type', type=str, default='OSA', choices=['cheb_graph_conv', 'graph_conv','OSA'])
     parser.add_argument('--gso_type', type=str, default='sym_norm_lap', choices=['sym_norm_lap', 'rw_norm_lap', 'sym_renorm_adj', 'rw_renorm_adj'])
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
-    parser.add_argument('--droprate', type=float, default=0.20)
+    parser.add_argument('--droprate', type=float, default=0.01)
     parser.add_argument('--lr', type=float, default=0.00015, help='learning rate')
     parser.add_argument('--weight_decay_rate', type=float, default=0.00001, help='weight decay (L2 penalty)')
     parser.add_argument('--batch_size', type=int, default=16)
@@ -62,7 +62,7 @@ def get_parameters():
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
     parser.add_argument('--complexity', type=int, default=8, help='number of bottleneck chnnal | in paper value is 16')
     parser.add_argument('--k_threshold', type=float, default=250.0, help='adjacency_matrix threshold parameter menual setting')
-    parser.add_argument('--fname', type=str, default='30_step_8_base_0.0015t', help='name')
+    parser.add_argument('--fname', type=str, default='30_step_8_base_0.0015_gangnam', help='name')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
