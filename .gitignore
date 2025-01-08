@@ -13,3 +13,6 @@ __pycache__/
 *.shx
 *.shx
 *.pt
+train_log_seoul30_step_8_base_0.0015t.csv
+STGCN_seoul.pt
+STGCN_seoul.pt

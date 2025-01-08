@@ -110,7 +110,7 @@ def evaluate_metric(model, data_iter, scaler):
             d = np.abs(y - y_pred)
             mae += d.tolist()
             sum_y += y.tolist()
-            mape += (d / y).tolist()
+            mape += (d / (y+1e-10)).tolist()
             mse += (d ** 2).tolist()
         MAE = np.array(mae).mean()
         #MAPE = np.array(mape).mean()

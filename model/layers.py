@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
-
+from torch_geometric.nn import ChebConv
 class Align(nn.Module):
     def __init__(self, c_in, c_out):
         super(Align, self).__init__()
@@ -214,14 +214,14 @@ class GraphConvLayer(nn.Module):
         self.align = Align(c_in, c_out)
         self.Ks = Ks
         self.gso = gso
-        if self.graph_conv_type == 'cheb_graph_conv':
+        if self.graph_conv_type == 'cheb_graph_conv' or self.graph_conv_type == 'OSA':
             self.cheb_graph_conv = ChebGraphConv(c_out, c_out, Ks, gso, bias)
         elif self.graph_conv_type == 'graph_conv':
             self.graph_conv = GraphConv(c_out, c_out, gso, bias)
 
     def forward(self, x):
         x_gc_in = self.align(x)
-        if self.graph_conv_type == 'cheb_graph_conv':
+        if self.graph_conv_type == 'cheb_graph_conv' or self.graph_conv_type == 'OSA':
             x_gc = self.cheb_graph_conv(x_gc_in)
         elif self.graph_conv_type == 'graph_conv':
             x_gc = self.graph_conv(x_gc_in)
@@ -281,4 +281,37 @@ class OutputBlock(nn.Module):
         x = self.dropout(x)
         x = self.fc2(x).permute(0, 3, 1, 2)
 
+        return x
+class OutputBlock_OSA(nn.Module):
+    # Output block contains 'TNFF' structure
+    # T: Gated Temporal Convolution Layer (GLU or GTU)
+    # N: Layer Normolization
+    # F: Fully-Connected Layer
+    # F: Fully-Connected Layer
+
+    def __init__(self, Ko, last_block_channel, channels, end_channel, n_vertex, act_func, bias, droprate,args):
+        super(OutputBlock_OSA, self).__init__()
+        self.tmp_conv1 = TemporalConvLayer(Ko, last_block_channel, channels[0], n_vertex, act_func)
+        self.fc1 = nn.Linear(in_features=channels[0], out_features=channels[1], bias=bias)
+        self.fc2 = nn.Linear(in_features=channels[1], out_features=end_channel, bias=bias)
+        self.tc1_ln = nn.LayerNorm([n_vertex, channels[0]], eps=1e-12)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(p=droprate)
+        self.scaleconv = nn.Conv2d(
+            in_channels=args.n_his*args.stblock_num-((args.Kt-1)*(args.stblock_num+1)*args.stblock_num)+1,
+            out_channels=1,  
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=True)
+
+    def forward(self, x,layer):
+        x = self.tmp_conv1(x)
+        x = self.tc1_ln(x.permute(0, 2, 3, 1))
+        x = self.fc1(x)
+        x = torch.cat([x, layer], dim=1)
+        x= self.scaleconv(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.fc2(x).permute(0, 3, 1, 2)
         return x
