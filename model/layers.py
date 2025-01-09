@@ -84,8 +84,8 @@ class TemporalConvLayer(nn.Module):
         self.silu = nn.SiLU()
         self.act_func = act_func
 
-    def forward(self, x):   
-        x_in = self.align(x)[:, :, self.Kt - 1:, :]
+    def forward(self, x,outnum=1):   
+        x_in = self.align(x)[:, :, self.Kt - outnum:, :]
         x_causal_conv = self.causal_conv(x)
 
         if self.act_func == 'glu' or self.act_func == 'gtu':
@@ -298,15 +298,15 @@ class OutputBlock_OSA(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(p=droprate)
         self.scaleconv = nn.Conv2d(
-            in_channels=args.n_his*args.stblock_num-((args.Kt-1)*(args.stblock_num+1)*args.stblock_num)+1,
-            out_channels=1,  
+            in_channels=args.n_his*args.stblock_num-((args.Kt-1)*(args.stblock_num+1)*args.stblock_num)+3,
+            out_channels=3,  
             kernel_size=1,
             stride=1,
             padding=0,
             bias=True)
 
     def forward(self, x,layer):
-        x = self.tmp_conv1(x)
+        x = self.tmp_conv1(x,outnum=3)
         x = self.tc1_ln(x.permute(0, 2, 3, 1))
         x = self.fc1(x)
         x = torch.cat([x, layer], dim=1)
