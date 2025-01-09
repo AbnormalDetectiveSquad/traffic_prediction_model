@@ -42,28 +42,44 @@ def get_parameters():
     parser.add_argument('--seed', type=int, default=42, help='set the random seed for stabilizing experiment results')
     parser.add_argument('--dataset', type=str, default='seoul', choices=['metr-la', 'pems-bay', 'pemsd7-m','seoul'])
     parser.add_argument('--n_his', type=int, default=24)#타임 스텝 1시간이면 12개
+
+
     parser.add_argument('--n_pred', type=int, default=3, help='the number of time interval for predcition, default as 3')
+
+
     parser.add_argument('--time_intvl', type=int, default=5)
+
+    
     parser.add_argument('--Kt', type=int, default=3)# Temporal Kernel Size
-    parser.add_argument('--stblock_num', type=int, default=4)
+    parser.add_argument('--stblock_num', type=int, default=5)
     parser.add_argument('--act_func', type=str, default='glu', choices=['glu', 'gtu'])
     parser.add_argument('--Ks', type=int, default=3, choices=[3, 2])
     parser.add_argument('--graph_conv_type', type=str, default='OSA', choices=['cheb_graph_conv', 'graph_conv','OSA'])
     parser.add_argument('--gso_type', type=str, default='sym_norm_lap', choices=['sym_norm_lap', 'rw_norm_lap', 'sym_renorm_adj', 'rw_renorm_adj'])
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
     parser.add_argument('--droprate', type=float, default=0.2)
-    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
+
+
+    parser.add_argument('--lr', type=float, default=0.0008, help='learning rate')
+    
+
     parser.add_argument('--weight_decay_rate', type=float, default=0.00001, help='weight decay (L2 penalty)')
-    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.95)
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
-    parser.add_argument('--complexity', type=int, default=8, help='number of bottleneck chnnal | in paper value is 16')
-    parser.add_argument('--k_threshold', type=float, default=250.0, help='adjacency_matrix threshold parameter menual setting')
-    parser.add_argument('--fname', type=str, default='15_triplestep_8_base_0.001_gangnam', help='name')
-    parser.add_argument('--mode', type=str, default='test', help='test or train')
+    parser.add_argument('--k_threshold', type=float, default=500.0, help='adjacency_matrix threshold parameter menual setting')
+
+
+    parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
+  
+
+    parser.add_argument('--fname', type=str, default='15_triplestep_4_base_0.0008_gangnam_0109', help='name')
+    parser.add_argument('--mode', type=str, default='train', help='test or train')
+    
+    
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -89,7 +105,7 @@ def get_parameters():
     blocks.append([1])
     n=args.complexity
     for l in range(args.stblock_num):
-        blocks.append([int(n*2), int(n), int(n*2)])
+        blocks.append([int(n*4), int(n), int(n*4)])
     if Ko == 0:
         blocks.append([int(n*8)])
     elif Ko > 0:
@@ -152,7 +168,7 @@ def prepare_model(args, blocks, n_vertex):
     es = earlystopping.EarlyStopping(delta=0.0, 
                                      patience=args.patience, 
                                      verbose=True, 
-                                     path="STGCN_" + args.dataset + args.fname + ".pt")
+                                     path="/Weight/STGCN_" + args.dataset + args.fname + ".pt")
 
     if args.graph_conv_type == 'cheb_graph_conv':
         model = models.STGCNChebGraphConv(args, blocks, n_vertex).to(device)
@@ -177,7 +193,7 @@ def prepare_model(args, blocks, n_vertex):
 def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
         # CSV 파일을 "쓰기 모드"로 열고, 필요하다면 헤더를 기록
     # - 'w'를 쓰면 매번 덮어씌워집니다. 이미 파일이 있으면 'a'로 열어 이어쓰기 가능
-    csv_path=f"train_log_{args.dataset+args.fname}.csv"
+    csv_path=f"/Log/train_log_{args.dataset+args.fname}.csv"
     if not os.path.exists(csv_path):
         with open(f"train_log_{args.dataset+args.fname}.csv", mode="w", newline="") as f:# CSV 헤더 한 번 작성 (원하면 생략 가능)
             writer = csv.writer(f)
@@ -191,7 +207,7 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
         model.train()
         scaler = GradScaler()
         for x, y in tqdm.tqdm(train_iter):
-            
+            x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
             with autocast(device_type='cuda', dtype=torch.float16):
                 if args.graph_conv_type == 'OSA':
@@ -204,6 +220,11 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
             scaler.update()
             l_sum += l.item() * y.shape[0]
             n += y.shape[0]
+            del x
+            del y
+            del y_pred
+            del l
+            torch.cuda.empty_cache() 
         scheduler.step()
         val_loss = val(model, val_iter,args)
         # GPU memory usage
@@ -232,16 +253,21 @@ def val(model, val_iter,args):
 
     l_sum, n = 0.0, 0
     for x, y in val_iter:
+        x, y = x.to(device), y.to(device)
         if args.graph_conv_type == 'OSA':
             y_pred = model(x).squeeze(1)
             l = loss(y_pred, y)
-            l_sum += l.item() * y.numel() / 3
-            n += y.numel() / 3
+
         else:# [batch_size, num_nodes, 3]
             y_pred = model(x).view(len(x), -1)  
             l = loss(y_pred, y)
-            l_sum += l.item() * y.shape[0]
-            n += y.shape[0]
+        l_sum += l.item() * y.shape[0]
+        n += y.shape[0]
+        del x
+        del y
+        del y_pred
+        del l
+        torch.cuda.empty_cache() 
     return torch.tensor(l_sum / n)
 
 
@@ -266,7 +292,7 @@ def test2(zscore, loss, model, test_iter, args):
         test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
 
     # Prepare CSV output
-    output_file = f"test_results_{args.dataset+args.fname}.csv"
+    output_file = f"/Result/test_results_{args.dataset+args.fname}.csv"
     with open(output_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(["Ground Truth", "Prediction"])
@@ -275,7 +301,7 @@ def test2(zscore, loss, model, test_iter, args):
         mid_point = args.batch_size // 2
         first_batch = next(iter(test_iter)) 
         _, ground_truth = first_batch 
-        ground_truth = ground_truth.to('cpu')
+        ground_truth = ground_truth
       # CSV 헤더 작성
         header = []
         for ch in range(ground_truth.size(1)):  # 채널 수 만큼 반복
@@ -303,6 +329,10 @@ def test2(zscore, loss, model, test_iter, args):
                         row.append(f"{gt_slice[ch, feature_idx].item():.6f}")  # Ground Truth
                         row.append(f"{pred_slice[ch, feature_idx].item():.6f}")  # Prediction
                     writer.writerow(row)
+        
+            del inputs
+            del ground_truth
+            torch.cuda.empty_cache() 
 
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
     print(f"Test results saved to {output_file}")

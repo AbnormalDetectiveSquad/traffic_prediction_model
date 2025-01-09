@@ -9,7 +9,7 @@ matplotlib.use('TkAgg')  # Tk 백엔드 사용
 import matplotlib.pyplot as plt
 
 
-def analyze_distance_distribution(distances, n_bins=30):
+def analyze_distance_distribution(distances, n_bins=40):
     # 도수분포표 계산
     hist, bin_edges = np.histogram(distances, bins=n_bins)
     
@@ -181,4 +181,4 @@ def data_transform(data, n_his, n_pred, device,triple=False):
         else:
             y[i] = data[tail + n_pred - 1]
 
-    return torch.Tensor(x).to(device), torch.Tensor(y).to(device)
+    return torch.Tensor(x), torch.Tensor(y)

@@ -18,7 +18,7 @@ class STGCNChebGraphConv_OSA(nn.Module):
             padding=0,
             bias=True)
         self.Ko = Ko #시간축 크기 저장
-        if self.Ko > 1: #시간축 크기가 1보다 크면 정규화 레이어를 통해 FC 레이어로 넘김
+        if self.Ko >= 1: #시간축 크기가 1보다 크면 정규화 레이어를 통해 FC 레이어로 넘김
             self.output = layers.OutputBlock_OSA(Ko, blocks[-3][-1], blocks[-2], blocks[-1][0], n_vertex, args.act_func, args.enable_bias, args.droprate,args) #출력 블록 생성
         elif self.Ko == 0: #시간축 크기가 0이면 바로 FC 레이어로 넘김
             self.fc1 = nn.Linear(in_features=blocks[-3][-1], out_features=blocks[-2][0], bias=args.enable_bias)
@@ -38,14 +38,9 @@ class STGCNChebGraphConv_OSA(nn.Module):
 
         features = self.scaleconv(features)
         features= features.permute(0, 2, 3, 1)
-        if self.Ko > 1:
-            x = self.output(x,features)
-        elif self.Ko == 0:
-            x = self.fc1(x.permute(0, 2, 3, 1))
-            x = x.permute(0, 3, 1, 2)
-            
-            x = self.relu(x)
-            x = self.fc2(x).permute(0, 3, 1, 2)
+        x = self.output(x,features)
+
+
         
         return x
     
