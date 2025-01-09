@@ -62,7 +62,7 @@ def get_parameters():
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
     parser.add_argument('--complexity', type=int, default=8, help='number of bottleneck chnnal | in paper value is 16')
     parser.add_argument('--k_threshold', type=float, default=250.0, help='adjacency_matrix threshold parameter menual setting')
-    parser.add_argument('--fname', type=str, default='15_step_8_base_0.001', help='name')
+    parser.add_argument('--fname', type=str, default='15_triplestep_8_base_0.001_gangnam', help='name')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -305,5 +305,5 @@ if __name__ == "__main__":
     n_vertex, zscore, train_iter, val_iter, test_iter = data_preparate(args, device)
     loss, es, model, optimizer, scheduler = prepare_model(args, blocks, n_vertex)
     train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)# 모델평가만 원할때 추석처리
-    test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
-    #test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용
+    #test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
+    test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용
