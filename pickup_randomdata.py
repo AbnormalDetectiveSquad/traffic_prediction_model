@@ -7,6 +7,7 @@ import numpy as np
 from script import dataloader
 import geopandas as gpd
 from tqdm import tqdm
+from main import get_parameters
 def validate_and_create_pivot_table(combined_data):
     # 중복 데이터 확인
     duplicates = combined_data.duplicated(subset=['Date', 'Time', 'Link_ID'], keep=False)
@@ -30,7 +31,7 @@ def validate_and_create_pivot_table(combined_data):
     pivot_data = pivot_data.sort_index()
     
     return pivot_data
-def get_files_list(number,option='non-holidays',data_dir='/home/kfe-shim/extract_its_data'):
+def get_files_list(number,option='non-holidays',data_dir='/home/ssy/extract_its_data'):
     # 파일 리스트 가져오기
     all_files = [f for f in os.listdir(data_dir) if f.endswith('_5Min.csv')]
     if option == 'all':
@@ -56,12 +57,15 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     
     # 맵핑 테이블 로드
     if not os.path.exists(mapping_file_path):
+        print(f"Mapping file not found: {mapping_file_path}.")
+        args, device, blocks = get_parameters()
+        print(f"Loaded parameters: {args}")
         nodes_name="filtered_nodes.shp"
         links_name="filtered_links.shp"
         nodes_gdf = gpd.read_file(os.path.join(dataset_path, nodes_name))
         links_gdf = gpd.read_file(os.path.join(dataset_path, links_name))
         save_option, dataset_path_new=dataloader.check_table_files(dataset_path, nodes_name, links_name)
-        dense_matrix,n_links=dataloader.create_adjacency_matrix(links_gdf, nodes_gdf,save_option,dataset_path_new)
+        dense_matrix,n_links=dataloader.create_adjacency_matrix(links_gdf, nodes_gdf,save_option,dataset_path_new,args.k_threshold)
         print(f"Link-Index map saved to {dataset_path_new}")
     
     mapping_table = pd.read_csv(mapping_file_path)
@@ -122,7 +126,7 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     print(f"Speed matrix saved to {output_path}")
 
 file=get_files_list(120)
-data_dir='/home/kfe-shim/extract_its_data'
+data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
 dataset_path_new='./data/seoul'
