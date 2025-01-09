@@ -54,7 +54,7 @@ def get_parameters():
     parser.add_argument('--droprate', type=float, default=0.2)
     parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     parser.add_argument('--weight_decay_rate', type=float, default=0.00001, help='weight decay (L2 penalty)')
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
@@ -63,6 +63,7 @@ def get_parameters():
     parser.add_argument('--complexity', type=int, default=8, help='number of bottleneck chnnal | in paper value is 16')
     parser.add_argument('--k_threshold', type=float, default=250.0, help='adjacency_matrix threshold parameter menual setting')
     parser.add_argument('--fname', type=str, default='15_triplestep_8_base_0.001_gangnam', help='name')
+    parser.add_argument('--mode', type=str, default='test', help='test or train')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -132,9 +133,13 @@ def data_preparate(args, device):
         x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, device)
         x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, device)
         x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, device)
+    if args.mode == 'train':
+        train_data = utils.data.TensorDataset(x_train, y_train)
+        train_iter = utils.data.DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=False)
+    else:
+        train_iter=None
+        train_data=None
 
-    train_data = utils.data.TensorDataset(x_train, y_train)
-    train_iter = utils.data.DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=False)
     val_data = utils.data.TensorDataset(x_val, y_val)
     val_iter = utils.data.DataLoader(dataset=val_data, batch_size=args.batch_size, shuffle=False)
     test_data = utils.data.TensorDataset(x_test, y_test)
@@ -255,7 +260,10 @@ def test2(zscore, loss, model, test_iter, args):
 
     # Evaluate the model
     test_MSE = utility.evaluate_model(model, loss, test_iter,args)
-    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
+    if args.graph_conv_type == 'OSA':
+        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric_OSA(model, test_iter, zscore)
+    else:
+        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
 
     # Prepare CSV output
     output_file = f"test_results_{args.dataset+args.fname}.csv"
@@ -265,7 +273,14 @@ def test2(zscore, loss, model, test_iter, args):
 
         max_batches = 16
         mid_point = args.batch_size // 2
-        
+        first_batch = next(iter(test_iter)) 
+        _, ground_truth = first_batch 
+        ground_truth = ground_truth.to('cpu')
+      # CSV 헤더 작성
+        header = []
+        for ch in range(ground_truth.size(1)):  # 채널 수 만큼 반복
+            header.extend([f"CH{ch} Ground Truth", f"CH{ch} Prediction"])
+        writer.writerow(header)
         for i, batch in enumerate(test_iter):
             if i >= max_batches:
                 break
@@ -274,19 +289,20 @@ def test2(zscore, loss, model, test_iter, args):
             inputs, ground_truth = inputs.to(device), ground_truth.to(device)
 
             with torch.no_grad():
-                predictions = model(inputs).view(len(inputs), -1)
+                predictions = model(inputs).squeeze(1)
 
-            # Denormalize if needed (apply zscore reverse transformation)
-            ground_truth = zscore.inverse_transform(ground_truth.cpu().numpy())
-            predictions = zscore.inverse_transform(predictions.cpu().numpy())
-
-            # 각 배치에서 첫 번째와 중간 위치의 데이터 저장
             indices = [0, mid_point]
             for idx in indices:
-                gt_slice = ground_truth[idx]
-                pred_slice = predictions[idx]
-                for gt, pred in zip(gt_slice, pred_slice):
-                    writer.writerow([f"{gt:.6f}", f"{pred:.6f}"])
+                gt_slice = ground_truth[idx, :, :]  # [채널, 피쳐]
+                pred_slice = predictions[idx, :, :]  # [채널, 피쳐]
+
+                # 각 피쳐별로 한 행에 기록
+                for feature_idx in range(gt_slice.size(1)):  # 피쳐 수 만큼 반복
+                    row = []
+                    for ch in range(gt_slice.size(0)):  # 채널 수 만큼 반복
+                        row.append(f"{gt_slice[ch, feature_idx].item():.6f}")  # Ground Truth
+                        row.append(f"{pred_slice[ch, feature_idx].item():.6f}")  # Prediction
+                    writer.writerow(row)
 
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
     print(f"Test results saved to {output_file}")
@@ -304,6 +320,7 @@ if __name__ == "__main__":
     args, device, blocks = get_parameters()
     n_vertex, zscore, train_iter, val_iter, test_iter = data_preparate(args, device)
     loss, es, model, optimizer, scheduler = prepare_model(args, blocks, n_vertex)
-    train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)# 모델평가만 원할때 추석처리
-    #test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
-    test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용
+    if args.mode == 'train':
+        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)# 모델평가만 원할때 추석처리
+    test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
+    #test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용

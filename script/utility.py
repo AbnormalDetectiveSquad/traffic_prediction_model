@@ -111,8 +111,34 @@ def evaluate_metric(model, data_iter, scaler):
     with torch.no_grad():
         mae, sum_y, mape, mse = [], [], [], []
         for x, y in data_iter:
-            y = scaler.inverse_transform(y.cpu().numpy()).reshape(-1)
+            y = scaler.inverse_transform(y.view(len(y), -1).cpu().numpy()).reshape(-1)
             y_pred = scaler.inverse_transform(model(x).view(len(x), -1).cpu().numpy()).reshape(-1)
+            d = np.abs(y - y_pred)
+            mae += d.tolist()
+            sum_y += y.tolist()
+            mape += (d / (y+1e-10)).tolist()
+            mse += (d ** 2).tolist()
+        MAE = np.array(mae).mean()
+        #MAPE = np.array(mape).mean()
+        RMSE = np.sqrt(np.array(mse).mean())
+        WMAPE = np.sum(np.array(mae)) / np.sum(np.array(sum_y))
+
+        #return MAE, MAPE, RMSE
+        return MAE, RMSE, WMAPE
+
+def evaluate_metric_OSA(model, data_iter, scaler):
+    model.eval()
+    with torch.no_grad():
+        mae, sum_y, mape, mse = [], [], [], []
+        for x, y in data_iter:
+            y_pred=model(x).squeeze(1).cpu().numpy()
+            y=y.cpu().numpy()
+            for i in range(y_pred.shape[1]):
+                y_pred[:,i,:]=scaler.inverse_transform(y_pred[:,i,:])
+                y[:,i,:]=scaler.inverse_transform(y[:,i,:])
+
+            y = y.reshape(-1)
+            y_pred = y_pred.reshape(-1)
             d = np.abs(y - y_pred)
             mae += d.tolist()
             sum_y += y.tolist()
