@@ -42,7 +42,7 @@ def get_parameters():
     parser.add_argument('--seed', type=int, default=42, help='set the random seed for stabilizing experiment results')
     parser.add_argument('--dataset', type=str, default='seoul', choices=['metr-la', 'pems-bay', 'pemsd7-m','seoul'])
     parser.add_argument('--n_his', type=int, default=24)#타임 스텝 1시간이면 12개
-    parser.add_argument('--n_pred', type=int, default=6, help='the number of time interval for predcition, default as 3')
+    parser.add_argument('--n_pred', type=int, default=3, help='the number of time interval for predcition, default as 3')
     parser.add_argument('--time_intvl', type=int, default=5)
     parser.add_argument('--Kt', type=int, default=3)# Temporal Kernel Size
     parser.add_argument('--stblock_num', type=int, default=4)
@@ -51,8 +51,8 @@ def get_parameters():
     parser.add_argument('--graph_conv_type', type=str, default='OSA', choices=['cheb_graph_conv', 'graph_conv','OSA'])
     parser.add_argument('--gso_type', type=str, default='sym_norm_lap', choices=['sym_norm_lap', 'rw_norm_lap', 'sym_renorm_adj', 'rw_renorm_adj'])
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
-    parser.add_argument('--droprate', type=float, default=0.01)
-    parser.add_argument('--lr', type=float, default=0.00015, help='learning rate')
+    parser.add_argument('--droprate', type=float, default=0.2)
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     parser.add_argument('--weight_decay_rate', type=float, default=0.00001, help='weight decay (L2 penalty)')
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
@@ -62,7 +62,7 @@ def get_parameters():
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
     parser.add_argument('--complexity', type=int, default=8, help='number of bottleneck chnnal | in paper value is 16')
     parser.add_argument('--k_threshold', type=float, default=250.0, help='adjacency_matrix threshold parameter menual setting')
-    parser.add_argument('--fname', type=str, default='30_step_8_base_0.0015_gangnam', help='name')
+    parser.add_argument('--fname', type=str, default='15_step_8_base_0.001', help='name')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -124,10 +124,14 @@ def data_preparate(args, device):
     train = zscore.fit_transform(train)
     val = zscore.transform(val)
     test = zscore.transform(test)
-
-    x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, device)
-    x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, device)
-    x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, device)
+    if args.graph_conv_type == 'OSA':
+        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, device,triple=True)
+        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, device,triple=True)
+        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, device,triple=True)
+    else:
+        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, device)
+        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, device)
+        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, device)
 
     train_data = utils.data.TensorDataset(x_train, y_train)
     train_iter = utils.data.DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=False)
@@ -185,7 +189,10 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
             
             optimizer.zero_grad()
             with autocast(device_type='cuda', dtype=torch.float16):
-                y_pred = model(x).view(len(x), -1)  # [batch_size, num_nodes]
+                if args.graph_conv_type == 'OSA':
+                    y_pred = model(x).squeeze(1)
+                else:# [batch_size, num_nodes, 3]
+                    y_pred = model(x).view(len(x), -1)  # [batch_size, num_nodes]
                 l = loss(y_pred, y)
             scaler.scale(l).backward()
             scaler.step(optimizer)
@@ -193,7 +200,7 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
             l_sum += l.item() * y.shape[0]
             n += y.shape[0]
         scheduler.step()
-        val_loss = val(model, val_iter)
+        val_loss = val(model, val_iter,args)
         # GPU memory usage
         gpu_mem_alloc = torch.cuda.max_memory_allocated() / 1000000 if torch.cuda.is_available() else 0
         print('Epoch: {:03d} | Lr: {:.20f} |Train loss: {:.6f} | Val loss: {:.6f} | GPU occupy: {:.6f} MiB'.\
@@ -215,15 +222,21 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
             break
 
 @torch.no_grad()
-def val(model, val_iter):
+def val(model, val_iter,args):
     model.eval()
 
     l_sum, n = 0.0, 0
     for x, y in val_iter:
-        y_pred = model(x).view(len(x), -1)
-        l = loss(y_pred, y)
-        l_sum += l.item() * y.shape[0]
-        n += y.shape[0]
+        if args.graph_conv_type == 'OSA':
+            y_pred = model(x).squeeze(1)
+            l = loss(y_pred, y)
+            l_sum += l.item() * y.numel() / 3
+            n += y.numel() / 3
+        else:# [batch_size, num_nodes, 3]
+            y_pred = model(x).view(len(x), -1)  
+            l = loss(y_pred, y)
+            l_sum += l.item() * y.shape[0]
+            n += y.shape[0]
     return torch.tensor(l_sum / n)
 
 
@@ -232,7 +245,7 @@ def test(zscore, loss, model, test_iter, args):
     model.load_state_dict(torch.load("STGCN_" + args.dataset + args.fname + ".pt"))
     model.eval()
 
-    test_MSE = utility.evaluate_model(model, loss, test_iter)
+    test_MSE = utility.evaluate_model(model, loss, test_iter,args)
     test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
 def test2(zscore, loss, model, test_iter, args):
@@ -241,7 +254,7 @@ def test2(zscore, loss, model, test_iter, args):
     model.eval()
 
     # Evaluate the model
-    test_MSE = utility.evaluate_model(model, loss, test_iter)
+    test_MSE = utility.evaluate_model(model, loss, test_iter,args)
     test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
 
     # Prepare CSV output

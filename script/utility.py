@@ -87,15 +87,21 @@ def cnv_sparse_mat_to_coo_tensor(sp_mat, device):
     else:
         raise TypeError(f'ERROR: The dtype of {sp_mat} is {sp_mat.dtype}, not been applied in implemented models.')
 
-def evaluate_model(model, loss, data_iter):
+def evaluate_model(model, loss, data_iter,args):
     model.eval()
     l_sum, n = 0.0, 0
     with torch.no_grad():
         for x, y in data_iter:
-            y_pred = model(x).view(len(x), -1)
-            l = loss(y_pred, y)
-            l_sum += l.item() * y.shape[0]
-            n += y.shape[0]
+            if args.graph_conv_type == 'OSA':
+                y_pred = model(x).squeeze(1)
+                l = loss(y_pred, y)
+                l_sum += l.item() * (y.numel()/3)  # 배치 평균 손실에 배치 크기를 곱함
+                n += (y.numel()/3)  # 총 데이터 개수 누적
+            else:# [batch_size, num_nodes, 3]
+                y_pred = model(x).view(len(x), -1)  # [batch_size, num_nodes]
+                l = loss(y_pred, y)
+                l_sum += l.item() * y.shape[0]
+                n += y.shape[0]
         mse = l_sum / n
         
         return mse
