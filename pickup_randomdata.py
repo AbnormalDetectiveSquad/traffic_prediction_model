@@ -1,13 +1,14 @@
 import holidays
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 from script import dataloader
 import geopandas as gpd
 from tqdm import tqdm
 from main import get_parameters
+
 def validate_and_create_pivot_table(combined_data):
     # 중복 데이터 확인
     duplicates = combined_data.duplicated(subset=['Date', 'Time', 'Link_ID'], keep=False)
@@ -97,12 +98,12 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
         print(f"Mapping file not found: {mapping_file_path}.")
         args, device, blocks = get_parameters()
         print(f"Loaded parameters: {args}")
-        nodes_name="filtered_nodes.shp"
-        links_name="filtered_links.shp"
+        nodes_name = "filtered_nodes.shp"
+        links_name = "filtered_links.shp"
         nodes_gdf = gpd.read_file(os.path.join(dataset_path, nodes_name))
         links_gdf = gpd.read_file(os.path.join(dataset_path, links_name))
-        save_option, dataset_path_new=dataloader.check_table_files(dataset_path, nodes_name, links_name)
-        dense_matrix,n_links=dataloader.create_adjacency_matrix(links_gdf, nodes_gdf,save_option,dataset_path_new,args.k_threshold)
+        save_option, dataset_path_new = dataloader.check_table_files(dataset_path, nodes_name, links_name)
+        dense_matrix, n_links = dataloader.create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path_new, args.k_threshold)
         print(f"Link-Index map saved to {dataset_path_new}")
     
     mapping_table = pd.read_csv(mapping_file_path)
@@ -114,8 +115,9 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     # 시간순 데이터를 저장할 리스트
     all_data = []
     processed_files = []
+    
     # 파일 리스트 순회
-    for f in tqdm(file,desc=f'Loding data from {data_dir}'):
+    for f in tqdm(file, desc=f'Loding data from {data_dir}'):
         file_path = os.path.join(data_dir, f)
         
         # 파일 로드
@@ -135,40 +137,64 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
         # 데이터 추가
         all_data.append(data)
         processed_files.append(f)
+
     # 전체 데이터를 하나의 DataFrame으로 병합
     if not all_data:
         print("No valid data found. Exiting.")
         return
     
     combined_data = pd.concat(all_data, ignore_index=True)
-    pivot_data=validate_and_create_pivot_table(combined_data)
-    # Pivot 테이블 생성: 행은 시간, 열은 Link_ID, 값은 Avg_Speed
-    #pivot_data = combined_data.pivot_table(
-    #    index=['Date', 'Time'], columns='Link_ID', values='Avg_Speed', aggfunc='mean'
-    #)
-    
+    pivot_data = validate_and_create_pivot_table(combined_data)
+
+    # 쌍둥이 피벗 테이블 생성
+    combined_data['Date'] = pd.to_datetime(combined_data['Date'].astype(str), format='%Y%m%d')
+    combined_data['Weight'] = calculate_weight_vectorized(combined_data['Date'])
+    weight_pivot = combined_data.pivot_table(
+        index=['Date', 'Time'], columns='Link_ID', values='Weight', aggfunc='mean', fill_value=0
+    )
+
     # 누락된 링크 ID를 추가하고 0으로 채우기
-    for link_id in tqdm(link_order ,desc='Remove missing links'):
+    for link_id in tqdm(link_order, desc='Remove missing links'):
         if link_id not in pivot_data.columns:
             pivot_data[link_id] = 0  # 없는 링크 ID는 0으로 채움
+        if link_id not in weight_pivot.columns:
+            weight_pivot[link_id] = 0  # 없는 링크 ID는 0으로 채움
 
     # 링크 ID 순서 재정렬
     pivot_data = pivot_data[link_order]
+    weight_pivot = weight_pivot[link_order]
+
     print(f"Number of rows in pivot_data: {len(pivot_data)}")
+    
     # 속도 값만 남기고 저장 (인덱스 제거)
     output_data = pivot_data.to_numpy()  # numpy 배열로 변환하여 순수 값만 유지
-    output_path = os.path.join(dataset_path, 'vel.csv')
-    pd.DataFrame(output_data, columns=link_order).to_csv(output_path, index=False, header=False)
+    weight_data = weight_pivot.to_numpy()
+    speed_output_path = os.path.join(dataset_path, 'vel.csv')
+    weight_output_path = os.path.join(dataset_path, 'weights.csv')
     
-    print(f"Speed matrix saved to {output_path}")
-        # 처리된 파일 이름 저장
+    pd.DataFrame(output_data, columns=link_order).to_csv(speed_output_path, index=False, header=False)
+    pd.DataFrame(weight_data, columns=link_order).to_csv(weight_output_path, index=False, header=False)
+    
+    print(f"Speed matrix saved to {speed_output_path}")
+    print(f"Weight matrix saved to {weight_output_path}")
+
+    # 처리된 파일 이름 저장
     file_list_path = os.path.join(dataset_path, 'processed_files.txt')
     with open(file_list_path, 'w') as file_list:
         file_list.write("\n".join(processed_files))
 
     print(f"Processed file list saved to {file_list_path}")
 
-file=get_files_list(120,option='sequential',start='20240304')
+def calculate_weight_vectorized(dates):
+    """
+    날짜에 따른 가중치를 벡터화 방식으로 처리.
+    """
+    weekdays = dates.dt.weekday
+    weights = weekdays.map(lambda wd: 1 if wd >= 5 else 0 if wd == 0 else 0.5 if wd == 4 else 0.1)
+    return weights
+
+
+file=get_files_list(100,option='sequential',start='20240304')
 data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)

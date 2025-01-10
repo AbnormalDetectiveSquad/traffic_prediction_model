@@ -60,14 +60,14 @@ def get_parameters():
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
     
     
-    parser.add_argument('--droprate', type=float, default=0.26)
+    parser.add_argument('--droprate', type=float, default=0.3)
 
 
-    parser.add_argument('--lr', type=float, default=0.0002, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     
 
 
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=4)
 
 
 
@@ -86,9 +86,9 @@ def get_parameters():
     parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
   
 
-    parser.add_argument('--fname', type=str, default='K450_base_0.00018_gangnamS_0110_Vauto', help='name')
-    parser.add_argument('--mode', type=str, default='test', help='test or train')
-    
+    parser.add_argument('--fname', type=str, default='K450_base_0.0001_gangnamS_seq_lr0.0004', help='name')
+    parser.add_argument('--mode', type=str, default='train', help='test or train')
+    parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
@@ -112,7 +112,11 @@ def get_parameters():
     # blocks: settings of channel size in st_conv_blocks and output layer,
     # using the bottleneck design in st_conv_blocks
     blocks = []
-    blocks.append([1])
+    if args.HotEncoding == 'On':
+        blocks.append([2])
+    else:
+        blocks.append([1])
+
     n=args.complexity
     for l in range(args.stblock_num):
         blocks.append([int(n*4), int(n), int(n*4)])
@@ -145,20 +149,26 @@ def data_preparate(args, device):
     len_train = int(data_col - len_val - len_test)
     #else:
 
-
-    train, val, test = dataloader.load_data(args.dataset, len_train, len_val)
+    #train, val, test = dataloader.load_data(args.dataset, len_train, len_val)
+    train, val, test = dataloader.load_data(args.dataset, len_train, len_val,options='multi')
     zscore = preprocessing.StandardScaler()
-    train = zscore.fit_transform(train)
-    val = zscore.transform(val)
-    test = zscore.transform(test)
-    if args.graph_conv_type == 'OSA':
-        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, device,triple=True)
-        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, device,triple=True)
-        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, device,triple=True)
+    if train.ndim == 3:
+        train[0,:,:] = zscore.fit_transform(train[0,:,:])
+        val[0,:,:]= zscore.transform(val[0,:,:])
+        test[0,:,:] = zscore.transform(test[0,:,:])
     else:
-        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, device)
-        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, device)
-        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, device)
+        train = zscore.fit_transform(train)
+        val = zscore.transform(val)
+        test = zscore.transform(test)
+
+    if args.graph_conv_type == 'OSA':
+        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, triple=True, Encoding=args.HotEncoding)
+        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, triple=True, Encoding=args.HotEncoding)
+        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, triple=True, Encoding=args.HotEncoding)
+    else:
+        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred)
+        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred)
+        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred)
     if args.mode == 'train':
         train_data = utils.data.TensorDataset(x_train, y_train)
         train_iter = utils.data.DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=False)

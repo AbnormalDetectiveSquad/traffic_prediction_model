@@ -126,14 +126,15 @@ def evaluate_model(model, loss, data_iter,args,device,zscore):
                 y = y.to(device)
                 y_pred = model(x).squeeze(1)
                 l = loss(y_pred, y)
-                if (qq>=100)&(qq<=126):
+                '''
+                if (qq>=0)&(qq<=1000):
                     debug_save(qq,x,y,'bad',zscore,sol=y_pred)
                     high+=1
                 if (qq>=300)&(qq<=326):
                     debug_save(qq,x,y,'good',zscore,sol=y_pred)
                     good+=1
                 qq+=1
-                
+                '''
                 l_sum += l.item() * (y.numel()/3)  # 배치 평균 손실에 배치 크기를 곱함
 
                 n += (y.numel()/3)  # 총 데이터 개수 누적

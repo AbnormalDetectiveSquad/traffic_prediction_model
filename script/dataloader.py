@@ -151,34 +151,64 @@ def load_adj(arg):
         n_vertex = adj.shape[0]
     return adj, n_vertex
 
-def load_data(dataset_name, len_train, len_val):
+def load_data(dataset_name, len_train, len_val,options='single'):
     dataset_path = './data'
     dataset_path = os.path.join(dataset_path, dataset_name)
-    vel = pd.read_csv(os.path.join(dataset_path, 'vel.csv'))
-    train = vel[: len_train]
-    val = vel[len_train: len_train + len_val]
-    test = vel[len_train + len_val:]
-    return train, val, test
-def data_transform(data, n_his, n_pred, device,triple=False):
-    # produce data slices for x_data and y_data
-
-    n_vertex = data.shape[1]
-    len_record = len(data)
-    num = len_record - n_his - n_pred
-    
-    x = np.zeros([num, 1, n_his, n_vertex])
-    if triple:
-        y = np.zeros([num, 3, n_vertex])
+    if options=='multi':
+        vel_e = pd.read_csv(os.path.join(dataset_path, 'weights.csv'))
+        vel_v = pd.read_csv(os.path.join(dataset_path, 'vel.csv'))
+        vel_v_array = vel_v.to_numpy()  # (19373, 1876)
+        vel_e_array = vel_e.to_numpy()  # (19373, 1876)
+        vel = np.stack([vel_v_array, vel_e_array], axis=0)
+        train = vel[:,: len_train,:]
+        val = vel[:,len_train: len_train + len_val,:]
+        test = vel[:,len_train + len_val:,:]
     else:
-        y = np.zeros([num, n_vertex])
-    
-    for i in range(num):
-        head = i
-        tail = i + n_his
-        x[i, :, :, :] = data[head: tail].reshape(1, n_his, n_vertex)
+        vel = pd.read_csv(os.path.join(dataset_path, 'vel.csv'))
+        train = vel[: len_train]
+        val = vel[len_train: len_train + len_val]
+        test = vel[len_train + len_val:]
+    return train, val, test
+def data_transform(data, n_his, n_pred, triple=False,Encoding='Off'):
+    # produce data slices for x_data and y_data
+    if Encoding=='Off':
+        n_vertex = data.shape[1]
+        len_record = len(data)
+        num = len_record - n_his - n_pred
+        
+        x = np.zeros([num, 1, n_his, n_vertex])
         if triple:
-            y[i,:,:] = data[tail + n_pred - 3:tail + n_pred ]
+            y = np.zeros([num, 3, n_vertex])
         else:
-            y[i] = data[tail + n_pred - 1]
+            y = np.zeros([num, n_vertex])
+        
+        for i in range(num):
+            head = i
+            tail = i + n_his
+            x[i, :, :, :] = data[head: tail].reshape(1, n_his, n_vertex)
+            if triple:
+                y[i,:,:] = data[tail + n_pred - 3:tail + n_pred ]
+            else:
+                y[i] = data[tail + n_pred - 1]
+
+    elif Encoding=='On':
+        n_vertex = data.shape[2]
+        len_record = data.shape[1]
+        num = len_record - n_his - n_pred
+        x = np.zeros([num, 2, n_his, n_vertex])
+        if triple:
+            y = np.zeros([num, 3, n_vertex])
+        else:
+            y = np.zeros([num, n_vertex])
+        
+        for i in range(num):
+            head = i
+            tail = i + n_his
+            x[i, :, :, :] = data[:,head: tail,:].reshape(2, n_his, n_vertex)
+            if triple:
+                y[i,:,:] = data[0,tail + n_pred - 3:tail + n_pred,:]
+            else:
+                y[i] = data[tail + n_pred - 1]
+
 
     return torch.Tensor(x), torch.Tensor(y)
