@@ -1,0 +1,4 @@
+Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0008,0.389694,9.497831,3244.61
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,1e-05,0.973643,11.497177,3244.61

@@ -18,6 +18,7 @@ import csv
 from script import dataloader, utility, earlystopping, opt
 from model import models
 from torch.amp import autocast, GradScaler
+import traceback
 #import nni
 
 def set_env(seed):
@@ -57,27 +58,36 @@ def get_parameters():
     parser.add_argument('--graph_conv_type', type=str, default='OSA', choices=['cheb_graph_conv', 'graph_conv','OSA'])
     parser.add_argument('--gso_type', type=str, default='sym_norm_lap', choices=['sym_norm_lap', 'rw_norm_lap', 'sym_renorm_adj', 'rw_renorm_adj'])
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
-    parser.add_argument('--droprate', type=float, default=0.2)
+    
+    
+    parser.add_argument('--droprate', type=float, default=0.26)
 
 
-    parser.add_argument('--lr', type=float, default=0.0008, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.0002, help='learning rate')
     
 
-    parser.add_argument('--weight_decay_rate', type=float, default=0.00001, help='weight decay (L2 penalty)')
-    parser.add_argument('--batch_size', type=int, default=16)
+
+    parser.add_argument('--batch_size', type=int, default=8)
+
+
+
+    parser.add_argument('--weight_decay_rate', type=float, default=0.0001, help='weight decay (L2 penalty)')
+    
+    
+    
     parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.95)
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
-    parser.add_argument('--k_threshold', type=float, default=500.0, help='adjacency_matrix threshold parameter menual setting')
+    parser.add_argument('--k_threshold', type=float, default=450.0, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
   
 
-    parser.add_argument('--fname', type=str, default='15_triplestep_4_base_0.0008_gangnam_0109', help='name')
-    parser.add_argument('--mode', type=str, default='train', help='test or train')
+    parser.add_argument('--fname', type=str, default='K450_base_0.00018_gangnamS_0110_Vauto', help='name')
+    parser.add_argument('--mode', type=str, default='test', help='test or train')
     
     
     args = parser.parse_args()
@@ -168,7 +178,7 @@ def prepare_model(args, blocks, n_vertex):
     es = earlystopping.EarlyStopping(delta=0.0, 
                                      patience=args.patience, 
                                      verbose=True, 
-                                     path="/Weight/STGCN_" + args.dataset + args.fname + ".pt")
+                                     path="./Weight/STGCN_" + args.dataset + args.fname + ".pt")
 
     if args.graph_conv_type == 'cheb_graph_conv':
         model = models.STGCNChebGraphConv(args, blocks, n_vertex).to(device)
@@ -193,15 +203,16 @@ def prepare_model(args, blocks, n_vertex):
 def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
         # CSV 파일을 "쓰기 모드"로 열고, 필요하다면 헤더를 기록
     # - 'w'를 쓰면 매번 덮어씌워집니다. 이미 파일이 있으면 'a'로 열어 이어쓰기 가능
-    csv_path=f"/Log/train_log_{args.dataset+args.fname}.csv"
+    csv_path=f"./Log/train_log_{args.dataset+args.fname}.csv"
     if not os.path.exists(csv_path):
-        with open(f"train_log_{args.dataset+args.fname}.csv", mode="w", newline="") as f:# CSV 헤더 한 번 작성 (원하면 생략 가능)
+        with open(csv_path, mode="w", newline="") as f:# CSV 헤더 한 번 작성 (원하면 생략 가능)
             writer = csv.writer(f)
             writer.writerow(["Epoch", "LR", "TrainLoss", "ValLoss", "GPUMem(MB)"])
     else:
-        with open(f"train_log_{args.dataset+args.fname}.csv", mode="a", newline="") as f:# CSV 헤더 한 번 작성 (원하면 생략 가능)
+        with open(csv_path, mode="a", newline="") as f:# CSV 헤더 한 번 작성 (원하면 생략 가능)
             writer = csv.writer(f)
             writer.writerow(["New Epoch", "LR", "TrainLoss", "ValLoss", "GPUMem(MB)"])
+    qq=0
     for epoch in range(args.epochs):
         l_sum, n = 0.0, 0  # 'l_sum' is epoch sum loss, 'n' is epoch instance number
         model.train()
@@ -219,12 +230,11 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
             scaler.step(optimizer)
             scaler.update()
             l_sum += l.item() * y.shape[0]
+            #print(f"train_loss {qq}: {l.item()}")
+            qq+=1
             n += y.shape[0]
-            del x
-            del y
-            del y_pred
-            del l
-            torch.cuda.empty_cache() 
+            #del x, y_pred,y,l
+            #torch.cuda.empty_cache() 
         scheduler.step()
         val_loss = val(model, val_iter,args)
         # GPU memory usage
@@ -252,47 +262,48 @@ def val(model, val_iter,args):
     model.eval()
 
     l_sum, n = 0.0, 0
+    qq=0
     for x, y in val_iter:
         x, y = x.to(device), y.to(device)
         if args.graph_conv_type == 'OSA':
-            y_pred = model(x).squeeze(1)
-            l = loss(y_pred, y)
+            with autocast(device_type='cuda', dtype=torch.float16):
+                y_pred = model(x).squeeze(1)
+                l = loss(y_pred, y)
 
         else:# [batch_size, num_nodes, 3]
             y_pred = model(x).view(len(x), -1)  
             l = loss(y_pred, y)
         l_sum += l.item() * y.shape[0]
+        #print(f"train_loss {qq}: {l.item()}")
+        qq+=1
         n += y.shape[0]
-        del x
-        del y
-        del y_pred
-        del l
-        torch.cuda.empty_cache() 
+        #del x,y_pred,y,l
+        #torch.cuda.empty_cache() 
     return torch.tensor(l_sum / n)
 
 
 @torch.no_grad() 
 def test(zscore, loss, model, test_iter, args):
-    model.load_state_dict(torch.load("STGCN_" + args.dataset + args.fname + ".pt"))
+    model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
     model.eval()
 
-    test_MSE = utility.evaluate_model(model, loss, test_iter,args)
-    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
+    test_MSE = utility.evaluate_model(model, loss, test_iter,args,device,zscore)
+    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore, device)
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
 def test2(zscore, loss, model, test_iter, args):
     # Load the model weights
-    model.load_state_dict(torch.load("STGCN_" + args.dataset + args.fname + ".pt"))
+    model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
     model.eval()
 
     # Evaluate the model
-    test_MSE = utility.evaluate_model(model, loss, test_iter,args)
+    test_MSE = utility.evaluate_model(model, loss, test_iter,args,device,zscore)
     if args.graph_conv_type == 'OSA':
-        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric_OSA(model, test_iter, zscore)
+        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric_OSA(model, test_iter, zscore, device)
     else:
-        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore)
+        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore, device)
 
     # Prepare CSV output
-    output_file = f"/Result/test_results_{args.dataset+args.fname}.csv"
+    output_file = f"./Result/test_results_{args.dataset+args.fname}.csv"
     with open(output_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(["Ground Truth", "Prediction"])
@@ -318,26 +329,37 @@ def test2(zscore, loss, model, test_iter, args):
                 predictions = model(inputs).squeeze(1)
 
             indices = [0, mid_point]
+        
+            predictions=predictions.cpu().numpy()
+            ground_truth=ground_truth.cpu().numpy()
+            for i in range(predictions.shape[1]):
+                predictions[:,i,:]=zscore.inverse_transform(predictions[:,i,:])
+                ground_truth[:,i,:]=zscore.inverse_transform(ground_truth[:,i,:])
+
             for idx in indices:
                 gt_slice = ground_truth[idx, :, :]  # [채널, 피쳐]
                 pred_slice = predictions[idx, :, :]  # [채널, 피쳐]
 
                 # 각 피쳐별로 한 행에 기록
-                for feature_idx in range(gt_slice.size(1)):  # 피쳐 수 만큼 반복
+                for feature_idx in range(gt_slice.shape[1]):  # 피쳐 수 만큼 반복
                     row = []
-                    for ch in range(gt_slice.size(0)):  # 채널 수 만큼 반복
-                        row.append(f"{gt_slice[ch, feature_idx].item():.6f}")  # Ground Truth
-                        row.append(f"{pred_slice[ch, feature_idx].item():.6f}")  # Prediction
+                    for ch in range(gt_slice.shape[0]):  # 채널 수 만큼 반복
+                        row.append(f"{gt_slice[ch, feature_idx]:.6f}")  # Ground Truth
+                        row.append(f"{pred_slice[ch, feature_idx]:.6f}")  # Prediction
                     writer.writerow(row)
         
-            del inputs
-            del ground_truth
-            torch.cuda.empty_cache() 
+            #del inputs
+            #del ground_truth
+            #torch.cuda.empty_cache() 
 
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
     print(f"Test results saved to {output_file}")
     
     
+
+
+
+
 if __name__ == "__main__":
     # Logging
     #logger = logging.getLogger('stgcn')

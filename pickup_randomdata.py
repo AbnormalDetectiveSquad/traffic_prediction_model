@@ -31,14 +31,14 @@ def validate_and_create_pivot_table(combined_data):
     pivot_data = pivot_data.sort_index()
     
     return pivot_data
-def get_files_list(number,option='non-holidays',data_dir='/home/kfe-shim/extract_its_data'):
+def get_files_list(number,option='non-holidays',start=None, data_dir='/home/ssy/extract_its_data'):
     # 파일 리스트 가져오기
     all_files = [f for f in os.listdir(data_dir) if f.endswith('_5Min.csv')]
     if option == 'all':
         print(f"Available files (all): {len(all_files)}")
         output=random.sample(all_files, number)
         print(output)
-    else:
+    elif option == 'non-holidays':
         # 공휴일 데이터 정의
         kr_holidays = holidays.KR(years=range(2024, 2025))
         # 공휴일 제외
@@ -50,6 +50,43 @@ def get_files_list(number,option='non-holidays',data_dir='/home/kfe-shim/extract
         print(f"Available files (non-holidays): {len(files)}")
         output=random.sample(files, number)
         print(output)
+    elif option == 'sequential':
+        # 시작 날짜가 없는 경우 에러 반환
+        if start is None:
+            raise ValueError("For 'sequential' option, 'start' must be provided in YYYYMMDD format.")
+        
+        # 시작 날짜 처리
+        try:
+            start_date = datetime.strptime(start, '%Y%m%d').date()
+        except ValueError:
+            raise ValueError("Invalid 'start' date format. Expected 'YYYYMMDD'.")
+        
+        # 파일 이름에서 날짜 추출 및 정렬
+        sorted_files = sorted(all_files, key=lambda f: datetime.strptime(f[:8], '%Y%m%d').date())
+
+        # 연속된 날짜의 파일 선택
+        selected_files = []
+        current_date = start_date
+
+        while len(selected_files) < number:
+            current_date_str = current_date.strftime('%Y%m%d')
+            matching_files = [f for f in sorted_files if f.startswith(current_date_str)]
+
+            if matching_files:
+                selected_files.extend(matching_files)
+
+            current_date += timedelta(days=1)
+
+            # 파일 개수 초과 방지
+            if len(selected_files) >= number:
+                selected_files = selected_files[:number]
+                break
+
+        print(f"Available files (sequential): {len(selected_files)}")
+        output = selected_files
+    else:
+        raise ValueError(f"Invalid option '{option}'. Choose from 'all', 'non-holidays', 'sequential'.")
+    
     return output
 def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='filtered_nodes_filtered_links_table.csv'):
     # 맵핑 테이블 경로
@@ -76,7 +113,7 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     
     # 시간순 데이터를 저장할 리스트
     all_data = []
-
+    processed_files = []
     # 파일 리스트 순회
     for f in tqdm(file,desc=f'Loding data from {data_dir}'):
         file_path = os.path.join(data_dir, f)
@@ -97,7 +134,7 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
         
         # 데이터 추가
         all_data.append(data)
-
+        processed_files.append(f)
     # 전체 데이터를 하나의 DataFrame으로 병합
     if not all_data:
         print("No valid data found. Exiting.")
@@ -124,9 +161,15 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     pd.DataFrame(output_data, columns=link_order).to_csv(output_path, index=False, header=False)
     
     print(f"Speed matrix saved to {output_path}")
+        # 처리된 파일 이름 저장
+    file_list_path = os.path.join(dataset_path, 'processed_files.txt')
+    with open(file_list_path, 'w') as file_list:
+        file_list.write("\n".join(processed_files))
 
-file=get_files_list(120)
-data_dir='/home/kfe-shim/extract_its_data'
+    print(f"Processed file list saved to {file_list_path}")
+
+file=get_files_list(120,option='sequential',start='20240304')
+data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
 dataset_path_new='./data/seoul'
