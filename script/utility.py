@@ -138,10 +138,12 @@ def evaluate_model(model, loss, data_iter,args,device,zscore):
                     debug_save(qq,x,y,'good',zscore,sol=y_pred)
                     good+=1
                 '''
+                '''
                 with open('LossT.csv', mode='a', newline='') as file:
                     writer= csv.writer(file)
                     writer.writerow([qq, l.item()])
                 qq+=1
+                '''
                 l_sum += l.item() * (y.numel()/3)  # 배치 평균 손실에 배치 크기를 곱함
 
                 n += (y.numel()/3)  # 총 데이터 개수 누적

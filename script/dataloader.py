@@ -104,7 +104,9 @@ def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_t
         })
         map_df.to_csv(dataset_path, index=False)
         print(f"Index-Link map saved to {dataset_path}")
-    
+    sparse_adj_matrix = sp.csr_matrix(adj_matrix)
+    sp.save_npz(dataset_path.replace('.csv', '_adj_matrix.npz'), sparse_adj_matrix)
+    print(f"Adjacency matrix saved to {dataset_path.replace('.csv', '_adj_matrix.npz')}")
     return adj_matrix, n_links
 
 def check_table_files(dataset_path, nodes_name, links_name):

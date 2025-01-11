@@ -185,19 +185,167 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
 
     print(f"Processed file list saved to {file_list_path}")
 
+def process_and_save_speed_matrix_chunk(data_dir, file_list, dataset_path, map_file_name='filtered_nodes_filtered_links_table.csv'):
+    # 맵핑 테이블 로드
+    mapping_file_path = os.path.join(dataset_path, map_file_name)
+    if not os.path.exists(mapping_file_path):
+        print(f"Mapping file not found: {mapping_file_path}.")
+        args, device, blocks = get_parameters()
+        print(f"Loaded parameters: {args}")
+        nodes_name = "filtered_nodes.shp"
+        links_name = "filtered_links.shp"
+        nodes_gdf = gpd.read_file(os.path.join(dataset_path, nodes_name))
+        links_gdf = gpd.read_file(os.path.join(dataset_path, links_name))
+        save_option, dataset_path_new = dataloader.check_table_files(dataset_path, nodes_name, links_name)
+        dense_matrix, n_links = dataloader.create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path_new, args.k_threshold)
+        print(f"Link-Index map saved to {dataset_path_new}")
+    
+    mapping_table = pd.read_csv(mapping_file_path)
+    print(f"Loaded mapping table with {len(mapping_table)} entries.")
+    link_order = mapping_table.sort_values('Matrix_Index')['Link_ID'].tolist()
+    
+    # 결과 파일 경로
+    speed_output_path = os.path.join(dataset_path, 'vel.csv')
+    weight_output_path = os.path.join(dataset_path, 'weights.csv')
+    
+    # 파일 초기화 (빈 파일 생성)
+    pd.DataFrame(columns=link_order).to_csv(speed_output_path, index=False, header=False)
+    pd.DataFrame(columns=link_order).to_csv(weight_output_path, index=False, header=False)
+    
+    # 처리된 파일 목록
+    processed_files = []
+    
+    # 배치 크기 설정
+    BATCH_SIZE = 10  # 한 번에 처리할 파일 수
+    
+    # 파일을 배치로 나누어 처리
+    for i in tqdm(range(0, len(file_list), BATCH_SIZE), desc=f'Loading data from {data_dir}'):
+        batch_files = file_list[i:i + BATCH_SIZE]
+        batch_data = []
+        
+        for f in batch_files:
+            file_path = os.path.join(data_dir, f)
+            
+            if not os.path.exists(file_path):
+                print(f"File not found: {file_path}, skipping.")
+                continue
+            
+            try:
+                # 파일 로드
+                data = pd.read_csv(file_path, header=None)
+                data.columns = ['Date', 'Time', 'Link_ID', 'Some_Column', 'Avg_Speed', 'Other']
+                data = data[['Link_ID', 'Date', 'Time', 'Avg_Speed']]
+                data = data.sort_values(by=['Date', 'Time'])
+                batch_data.append(data)
+                processed_files.append(f)
+            except Exception as e:
+                print(f"Error processing file {f}: {str(e)}")
+                continue
+        
+        if not batch_data:
+            continue
+            
+        # 배치 데이터 통합 및 처리
+        combined_batch = pd.concat(batch_data, ignore_index=True)
+        combined_batch['Date'] = pd.to_datetime(combined_batch['Date'].astype(str), format='%Y%m%d')
+        
+        # 가중치 계산
+        combined_batch['Weight'] = calculate_weight_vectorized(combined_batch['Date'])
+        
+        # 피벗 테이블 생성
+        pivot_speed = combined_batch.pivot_table(
+            index=['Date', 'Time'], 
+            columns='Link_ID', 
+            values='Avg_Speed', 
+            aggfunc='mean',
+            fill_value=0
+        ).sort_index()  # 시간순 보장
+        
+        pivot_weight = combined_batch.pivot_table(
+            index=['Date', 'Time'],
+            columns='Link_ID',
+            values='Weight',
+            aggfunc='mean',
+            fill_value=0
+        ).sort_index()  # 시간순 보장
+        
+        # 누락된 링크 처리
+        for link_id in link_order:
+            if link_id not in pivot_speed.columns:
+                pivot_speed[link_id] = 0
+            if link_id not in pivot_weight.columns:
+                pivot_weight[link_id] = 0
+        
+        # 링크 순서 정렬
+        pivot_speed = pivot_speed[link_order]
+        pivot_weight = pivot_weight[link_order]
+        
+        # numpy 배열로 변환
+        speed_array = pivot_speed.to_numpy()
+        weight_array = pivot_weight.to_numpy()
+        
+        # 배치 결과를 파일에 추가
+        with open(speed_output_path, 'a') as f:
+            pd.DataFrame(speed_array, columns=link_order).to_csv(f, 
+                                                               index=False, 
+                                                               header=False)
+        
+        with open(weight_output_path, 'a') as f:
+            pd.DataFrame(weight_array, columns=link_order).to_csv(f, 
+                                                                index=False, 
+                                                                header=False)
+        
+        # 메모리 정리
+        del batch_data, combined_batch, pivot_speed, pivot_weight
+        del speed_array, weight_array
+    
+    # 처리된 파일 목록 저장
+    file_list_path = os.path.join(dataset_path, 'processed_files.txt')
+    with open(file_list_path, 'w') as file_list:
+        file_list.write("\n".join(processed_files))
+
+    print(f"Speed matrix saved to {speed_output_path}")
+    print(f"Weight matrix saved to {weight_output_path}")
+    print(f"Processed file list saved to {file_list_path}")
+
 def calculate_weight_vectorized(dates):
     """
     날짜에 따른 가중치를 벡터화 방식으로 처리.
+    주말(토,일)과 공휴일은 1, 월요일은 0, 금요일은 0.5, 그 외 평일은 0.1
+    
+    Args:
+        dates: pandas datetime series
+    Returns:
+        Series: 각 날짜별 가중치
     """
+    # 공휴일 설정
+    kr_holidays = holidays.KR(years=range(2024, 2025))
+    
+    # 주말 여부
     weekdays = dates.dt.weekday
-    weights = weekdays.map(lambda wd: 1 if wd >= 5 else 0 if wd == 0 else 0.5 if wd == 4 else 0.1)
+    
+    # 공휴일 여부 (True/False 시리즈)
+    is_holiday = dates.dt.date.map(lambda x: x in kr_holidays)
+    
+    # 가중치 계산 (주말이거나 공휴일이면 1)
+    weights = pd.Series(index=dates.index)
+    
+    # 기본 가중치 설정
+    weights.loc[weekdays == 0] = 0  # 월요일
+    weights.loc[weekdays == 4] = 0.5  # 금요일
+    weights.loc[(weekdays > 0) & (weekdays < 4)] = 0.1  # 화-목요일
+    weights.loc[weekdays >= 5] = 1  # 주말
+    
+    # 공휴일은 1로 덮어쓰기
+    weights.loc[is_holiday] = 1
+
     return weights
 
 
-file=get_files_list(80,option='sequential',start='20240101')
+file=get_files_list(50,option='sequential',start='20240101')
 data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
 dataset_path_new='./data/seoul'
 print(f"Loaded data from {data}")
-process_and_save_speed_matrix(data_dir, file, dataset_path_new)
+process_and_save_speed_matrix_chunk(data_dir, file, dataset_path_new)

@@ -86,8 +86,8 @@ def get_parameters():
     parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
   
 
-    parser.add_argument('--fname', type=str, default='K460_16base_S80samp_seq_lr0.0001', help='name')
-    parser.add_argument('--mode', type=str, default='test', help='test or train')
+    parser.add_argument('--fname', type=str, default='K460_16base_S250samp_seq_lr0.0001', help='name')
+    parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     
     args = parser.parse_args()
