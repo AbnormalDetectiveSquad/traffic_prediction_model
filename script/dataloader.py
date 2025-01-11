@@ -210,5 +210,22 @@ def data_transform(data, n_his, n_pred, triple=False,Encoding='Off'):
             else:
                 y[i] = data[tail + n_pred - 1]
 
-
-    return torch.Tensor(x), torch.Tensor(y)
+    # 배치 처리를 위한 변수들
+    batch_size = 1000
+    x_tensors = []
+    y_tensors = []
+    
+    # 전체 데이터를 batch_size 크기로 나누어 처리
+    for start_idx in range(0, num, batch_size):
+        end_idx = min(start_idx + batch_size, num)
+        x_batch = torch.Tensor(x[start_idx:end_idx])
+        y_batch = torch.Tensor(y[start_idx:end_idx])
+        
+        x_tensors.append(x_batch)
+        y_tensors.append(y_batch)
+    
+    # 모든 배치를 합침
+    final_x = torch.cat(x_tensors, dim=0)
+    final_y = torch.cat(y_tensors, dim=0)
+    
+    return final_x, final_y
