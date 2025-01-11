@@ -120,12 +120,16 @@ def evaluate_model(model, loss, data_iter,args,device,zscore):
         qq=0
         high=0
         good=0
+        with open('Loss.csv', mode='w', newline='') as file:
+            writer= csv.writer(file)
+            writer.writerow(['Batch_num', 'Loss'])
         for x, y in data_iter:
             if args.graph_conv_type == 'OSA':
                 x = x.to(device)
                 y = y.to(device)
                 y_pred = model(x).squeeze(1)
                 l = loss(y_pred, y)
+
                 '''
                 if (qq>=0)&(qq<=1000):
                     debug_save(qq,x,y,'bad',zscore,sol=y_pred)
@@ -133,8 +137,11 @@ def evaluate_model(model, loss, data_iter,args,device,zscore):
                 if (qq>=300)&(qq<=326):
                     debug_save(qq,x,y,'good',zscore,sol=y_pred)
                     good+=1
-                qq+=1
                 '''
+                with open('LossT.csv', mode='a', newline='') as file:
+                    writer= csv.writer(file)
+                    writer.writerow([qq, l.item()])
+                qq+=1
                 l_sum += l.item() * (y.numel()/3)  # 배치 평균 손실에 배치 크기를 곱함
 
                 n += (y.numel()/3)  # 총 데이터 개수 누적

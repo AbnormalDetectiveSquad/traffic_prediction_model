@@ -60,18 +60,18 @@ def get_parameters():
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
     
     
-    parser.add_argument('--droprate', type=float, default=0.3)
+    parser.add_argument('--droprate', type=float, default=0.01)
 
 
-    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
     
 
 
-    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--batch_size', type=int, default=1)
 
 
 
-    parser.add_argument('--weight_decay_rate', type=float, default=0.0001, help='weight decay (L2 penalty)')
+    parser.add_argument('--weight_decay_rate', type=float, default=0.00000, help='weight decay (L2 penalty)')
     
     
     
@@ -80,14 +80,14 @@ def get_parameters():
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.95)
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
-    parser.add_argument('--k_threshold', type=float, default=450.0, help='adjacency_matrix threshold parameter menual setting')
+    parser.add_argument('--k_threshold', type=float, default=460.0, help='adjacency_matrix threshold parameter menual setting')
 
 
     parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
   
 
-    parser.add_argument('--fname', type=str, default='K450_base_0.0001_gangnamS_seq_lr0.0004', help='name')
-    parser.add_argument('--mode', type=str, default='train', help='test or train')
+    parser.add_argument('--fname', type=str, default='K460_16base_S80samp_seq_lr0.0001', help='name')
+    parser.add_argument('--mode', type=str, default='test', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     
     args = parser.parse_args()
@@ -384,5 +384,6 @@ if __name__ == "__main__":
     loss, es, model, optimizer, scheduler = prepare_model(args, blocks, n_vertex)
     if args.mode == 'train':
         train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)# 모델평가만 원할때 추석처리
+    #test2(zscore, loss, model, val_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
     test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
     #test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용
