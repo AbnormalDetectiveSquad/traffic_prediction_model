@@ -7,6 +7,7 @@ import numpy as np
 from script import dataloader
 import geopandas as gpd
 from tqdm import tqdm
+import h5py
 from main import get_parameters
 
 def validate_and_create_pivot_table(combined_data):
@@ -171,9 +172,17 @@ def process_and_save_speed_matrix(data_dir, file, dataset_path, map_file_name='f
     weight_data = weight_pivot.to_numpy()
     speed_output_path = os.path.join(dataset_path, 'vel.csv')
     weight_output_path = os.path.join(dataset_path, 'weights.csv')
-    
-    pd.DataFrame(output_data, columns=link_order).to_csv(speed_output_path, index=False, header=False)
-    pd.DataFrame(weight_data, columns=link_order).to_csv(weight_output_path, index=False, header=False)
+    speed_h5_path = os.path.join(dataset_path, 'speed_matrix.h5')
+    weight_h5_path = os.path.join(dataset_path, 'weight_matrix.h5')
+    # speed_matrix 저장
+    with h5py.File(speed_h5_path, 'w') as hf:
+        hf.create_dataset('speed_matrix', data=output_data)
+
+    # weight_matrix 저장
+    with h5py.File(weight_h5_path, 'w') as hf:
+        hf.create_dataset('weight_matrix', data=weight_data)
+    #pd.DataFrame(output_data, columns=link_order).to_csv(speed_output_path, index=False, header=False)
+    #pd.DataFrame(weight_data, columns=link_order).to_csv(weight_output_path, index=False, header=False)
     
     print(f"Speed matrix saved to {speed_output_path}")
     print(f"Weight matrix saved to {weight_output_path}")
@@ -207,11 +216,15 @@ def process_and_save_speed_matrix_chunk(data_dir, file_list, dataset_path, map_f
     # 결과 파일 경로
     speed_output_path = os.path.join(dataset_path, 'vel.csv')
     weight_output_path = os.path.join(dataset_path, 'weights.csv')
-    
+        # HDF5 파일 열기 (추가 모드)
+    speed_h5_path = os.path.join(dataset_path, 'speed_matrix.h5')
+    weight_h5_path = os.path.join(dataset_path, 'weight_matrix.h5')
     # 파일 초기화 (빈 파일 생성)
-    pd.DataFrame(columns=link_order).to_csv(speed_output_path, index=False, header=False)
-    pd.DataFrame(columns=link_order).to_csv(weight_output_path, index=False, header=False)
-    
+    #pd.DataFrame(columns=link_order).to_csv(speed_output_path, index=False, header=False)
+    #pd.DataFrame(columns=link_order).to_csv(weight_output_path, index=False, header=False)
+    with h5py.File(speed_h5_path, 'a') as speed_hf, h5py.File(weight_h5_path, 'a') as weight_hf:
+        speed_dataset = speed_hf['speed_matrix']
+        weight_dataset = weight_hf['weight_matrix']
     # 처리된 파일 목록
     processed_files = []
     
@@ -221,7 +234,8 @@ def process_and_save_speed_matrix_chunk(data_dir, file_list, dataset_path, map_f
     # 파일을 배치로 나누어 처리
     for i in tqdm(range(0, len(file_list), BATCH_SIZE), desc=f'Loading data from {data_dir}'):
         batch_files = file_list[i:i + BATCH_SIZE]
-        batch_data = []
+        batch_data_speed = []
+        batch_data_weight = []
         
         for f in batch_files:
             file_path = os.path.join(data_dir, f)
@@ -236,6 +250,10 @@ def process_and_save_speed_matrix_chunk(data_dir, file_list, dataset_path, map_f
                 data.columns = ['Date', 'Time', 'Link_ID', 'Some_Column', 'Avg_Speed', 'Other']
                 data = data[['Link_ID', 'Date', 'Time', 'Avg_Speed']]
                 data = data.sort_values(by=['Date', 'Time'])
+                
+
+
+                
                 batch_data.append(data)
                 processed_files.append(f)
             except Exception as e:
@@ -308,6 +326,131 @@ def process_and_save_speed_matrix_chunk(data_dir, file_list, dataset_path, map_f
     print(f"Weight matrix saved to {weight_output_path}")
     print(f"Processed file list saved to {file_list_path}")
 
+def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, map_file_name='filtered_nodes_filtered_links_table.csv'):
+    # 맵핑 테이블 로드
+    mapping_file_path = os.path.join(dataset_path, map_file_name)
+    if not os.path.exists(mapping_file_path):
+        print(f"Mapping file not found: {mapping_file_path}.")
+        # 필요한 경우 맵핑 테이블 생성 로직 추가
+        # ...
+    
+    mapping_table = pd.read_csv(mapping_file_path)
+    print(f"Loaded mapping table with {len(mapping_table)} entries.")
+    link_order = mapping_table.sort_values('Matrix_Index')['Link_ID'].tolist()
+    
+    # HDF5 파일 열기 (추가 모드)
+    speed_h5_path = os.path.join(dataset_path, 'speed_matrix.h5')
+    weight_h5_path = os.path.join(dataset_path, 'weight_matrix.h5')
+    
+    with h5py.File(speed_h5_path, 'a') as speed_hf, h5py.File(weight_h5_path, 'w') as weight_hf:
+        num_columns = len(link_order)  # 열 수를 link_order 길이로 설정
+
+        # speed_matrix 데이터셋 확인 및 생성
+        if 'speed_matrix' not in speed_hf:
+            speed_dataset = speed_hf.create_dataset(
+                'speed_matrix',
+                shape=(0, num_columns),
+                maxshape=(None, num_columns),
+                chunks=(1000, num_columns),  # 청크 크기 설정
+                dtype='float32'
+            )
+        else:
+            speed_dataset = speed_hf['speed_matrix']
+
+        # weight_matrix 데이터셋 확인 및 생성
+        if 'weight_matrix' not in weight_hf:
+            weight_dataset = weight_hf.create_dataset(
+                'weight_matrix',
+                shape=(0, num_columns),
+                maxshape=(None, num_columns),
+                chunks=(1000, num_columns),  # 청크 크기 설정
+                dtype='float32'
+            )
+        else:
+            weight_dataset = weight_hf['weight_matrix']
+        
+        # 배치 크기 설정
+        BATCH_SIZE = 10  # 한 번에 처리할 파일 수
+        
+        processed_files = []
+        
+        # 파일을 배치로 나누어 처리
+        for i in tqdm(range(0, len(file_list), BATCH_SIZE), desc=f'Loading data from {data_dir}'):
+            batch_files = file_list[i:i + BATCH_SIZE]
+            batch_data_speed = []
+            batch_data_weight = []
+            
+            for f in batch_files:
+                file_path = os.path.join(data_dir, f)
+                
+                if not os.path.exists(file_path):
+                    print(f"File not found: {file_path}, skipping.")
+                    continue
+                
+                try:
+                    # 파일 로드
+                    data = pd.read_csv(file_path, header=None)
+                    data.columns = ['Date', 'Time', 'Link_ID', 'Some_Column', 'Avg_Speed', 'Other']
+                    
+                    # 필요한 열만 유지 및 정렬
+                    data = data[['Link_ID', 'Date', 'Time', 'Avg_Speed']]
+                    data = data.sort_values(by=['Date', 'Time'])
+                    
+                    # 데이터 변환
+                    pivot_speed = data.pivot_table(
+                        index=['Date', 'Time'], 
+                        columns='Link_ID', 
+                        values='Avg_Speed', 
+                        aggfunc='mean',
+                        fill_value=0
+                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
+
+                    # 가중치 계산 (예시, 실제 로직에 맞게 수정 필요)
+                    combined_batch = data.copy()
+                    combined_batch['Date'] = pd.to_datetime(combined_batch['Date'].astype(str), format='%Y%m%d')
+                    combined_batch['Weight'] = calculate_weight_vectorized(combined_batch['Date'])
+                    pivot_weight = combined_batch.pivot_table(
+                        index=['Date', 'Time'],
+                        columns='Link_ID',
+                        values='Weight',
+                        aggfunc='mean',
+                        fill_value=0
+                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
+                    
+                    batch_data_speed.append(pivot_speed)
+                    batch_data_weight.append(pivot_weight)
+                    processed_files.append(f)
+                except Exception as e:
+                    print(f"Error processing file {f}: {str(e)}")
+                    continue
+            
+            if not batch_data_speed or not batch_data_weight:
+                continue
+            
+            # 배치 데이터 합치기
+            batch_speed_array = np.vstack(batch_data_speed)
+            batch_weight_array = np.vstack(batch_data_weight)
+            
+            # 기존 데이터셋에 배치 추가
+            current_speed_rows = speed_dataset.shape[0]
+            new_speed_rows = batch_speed_array.shape[0]
+            speed_dataset.resize((current_speed_rows + new_speed_rows, speed_dataset.shape[1]))
+            speed_dataset[current_speed_rows:current_speed_rows + new_speed_rows, :] = batch_speed_array
+            
+            current_weight_rows = weight_dataset.shape[0]
+            new_weight_rows = batch_weight_array.shape[0]
+            weight_dataset.resize((current_weight_rows + new_weight_rows, weight_dataset.shape[1]))
+            weight_dataset[current_weight_rows:current_weight_rows + new_weight_rows, :] = batch_weight_array
+            
+            # 메모리 정리
+            del batch_data_speed, batch_data_weight, batch_speed_array, batch_weight_array
+        
+        # 처리된 파일 목록 저장
+        file_list_path = os.path.join(dataset_path, 'processed_files.txt')
+        with open(file_list_path, 'w') as file_list_f:
+            file_list_f.write("\n".join(processed_files))
+
+
 def calculate_weight_vectorized(dates):
     """
     날짜에 따른 가중치를 벡터화 방식으로 처리.
@@ -342,10 +485,10 @@ def calculate_weight_vectorized(dates):
     return weights
 
 
-file=get_files_list(50,option='sequential',start='20240101')
+file=get_files_list(200,option='sequential',start='20240101')
 data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
 dataset_path_new='./data/seoul'
 print(f"Loaded data from {data}")
-process_and_save_speed_matrix_chunk(data_dir, file, dataset_path_new)
+process_and_save_speed_matrix_chunk_hdf5(data_dir, file, dataset_path_new)
