@@ -40,7 +40,6 @@ def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_t
     link_ids = links_gdf['LINK_ID'].unique()
     link_index_map = {link_id: idx for idx, link_id in enumerate(link_ids)}
     n_links = len(link_ids)
-    
     # Step 2: 인접 행렬 초기화
     adj_matrix = np.zeros((n_links, n_links))
     
@@ -51,9 +50,7 @@ def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_t
     for _, node in nodes_gdf.iterrows():
         connected_links = links_gdf[
             (links_gdf['F_NODE'] == node['NODE_ID']) | 
-            (links_gdf['T_NODE'] == node['NODE_ID'])
-        ]
-        
+            (links_gdf['T_NODE'] == node['NODE_ID'])]
         link_points = connected_links[['LINK_ID', 'centroid']]
         
         for i, row1 in link_points.iterrows():
@@ -61,21 +58,15 @@ def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_t
                 if i < j:
                     dist = row1['centroid'].distance(row2['centroid'])
                     all_distances.append(float(dist))
-    
     #analyze_distance_distribution(all_distances)
-    
     # sigma를 거리의 표준편차로 설정
     sigma = np.std(all_distances)
-    
     # Step 4: 가중치 계산 (k_threshold는 외부에서 받음)
     for _, node in nodes_gdf.iterrows():
         connected_links = links_gdf[
             (links_gdf['F_NODE'] == node['NODE_ID']) | 
-            (links_gdf['T_NODE'] == node['NODE_ID'])
-        ]
-        
+            (links_gdf['T_NODE'] == node['NODE_ID'])]
         link_points = connected_links[['LINK_ID', 'centroid']]
-        
         for i, row1 in link_points.iterrows():
             for j, row2 in link_points.iterrows():
                 if i < j:
@@ -88,15 +79,12 @@ def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_t
                         weight = np.exp(-(dist**2) / (2 * sigma**2))
                         adj_matrix[idx1, idx2] = weight
                         adj_matrix[idx2, idx1] = weight
-    
     print(f"Using manual k_threshold: {k_threshold:.2f}m")
     print(f"Calculated sigma from data: {sigma:.2f}m")
-    
     # Step 5: 정규화
     max_value = np.max(adj_matrix)
     if max_value > 0:
         adj_matrix /= max_value
-        
     if save_option:
         map_df = pd.DataFrame({
             'Matrix_Index': list(link_index_map.values()),
@@ -115,7 +103,6 @@ def check_table_files(dataset_path, nodes_name, links_name):
         dataset_path,
         f"{nodes_name.replace('.shp', '')}_{links_name.replace('.shp', '')}_table.csv"
     )
-
     # 파일 존재 여부 확인
     file_exists = os.path.exists(combined_table_file)
 
@@ -126,7 +113,6 @@ def check_table_files(dataset_path, nodes_name, links_name):
     print(f"Combined table file path: {combined_table_file}")
     print(f"Combined table file exists: {file_exists}")
     print(f"Save option set to: {save_option}")
-
     return save_option, combined_table_file
 def load_adj(arg):
     dataset_name=arg.dataset
@@ -142,6 +128,7 @@ def load_adj(arg):
         elif dataset_name == 'pemsd7-m':
             n_vertex = 228
     else:
+
         nodes_name="filtered_nodes.shp"
         links_name="filtered_links.shp"
         dataset_path = os.path.join(dataset_path, dataset_name)

@@ -8,7 +8,7 @@ from script import dataloader
 import geopandas as gpd
 from tqdm import tqdm
 import h5py
-from main import get_parameters
+from main_old import get_parameters
 
 def validate_and_create_pivot_table(combined_data):
     # 중복 데이터 확인
@@ -485,7 +485,7 @@ def calculate_weight_vectorized(dates):
     return weights
 
 
-file=get_files_list(200,option='sequential',start='20240101')
+file=get_files_list(250,option='sequential',start='20240101')
 data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)

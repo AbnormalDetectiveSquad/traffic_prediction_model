@@ -2,23 +2,20 @@ import logging
 import os
 import gc
 import argparse
-import math
 import random
 import warnings
 import tqdm
 import numpy as np
-import pandas as pd
-from sklearn import preprocessing
 import csv
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.utils as utils
 import csv
-from script import dataloader, utility, earlystopping, opt
+from script import file_input as fi
+from script import utility, earlystopping, opt
 from model import models
 from torch.amp import autocast, GradScaler
-import traceback
+
 #import nni
 
 def set_env(seed):
@@ -35,8 +32,7 @@ def set_env(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    # torch.use_deterministic_algorithms(True)
-
+    # torch.use_deterministic_algorithms(True)  
 def get_parameters():
     parser = argparse.ArgumentParser(description='STGCN')
     parser.add_argument('--enable_cuda', type=bool, default=True, help='enable CUDA, default as True')
@@ -47,10 +43,8 @@ def get_parameters():
 
     parser.add_argument('--n_pred', type=int, default=3, help='the number of time interval for predcition, default as 3')
 
-
     parser.add_argument('--time_intvl', type=int, default=5)
 
-    
     parser.add_argument('--Kt', type=int, default=3)# Temporal Kernel Size
     parser.add_argument('--stblock_num', type=int, default=5)
     parser.add_argument('--act_func', type=str, default='glu', choices=['glu', 'gtu'])
@@ -67,7 +61,7 @@ def get_parameters():
     
 
 
-    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=16)
 
 
 
@@ -86,7 +80,7 @@ def get_parameters():
     parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
   
 
-    parser.add_argument('--fname', type=str, default='K460_16base_S250samp_seq_lr0.0001', help='name')
+    parser.add_argument('--fname', type=str, default='K460_16base_S220samp_seq_lr0.0001_0112p', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     
@@ -106,7 +100,7 @@ def get_parameters():
     else:
         device = torch.device('cpu')
         gc.collect() # Clean cache
-    
+    args.device = device
     Ko = args.n_his - (args.Kt - 1) * 2 * args.stblock_num
 
     # blocks: settings of channel size in st_conv_blocks and output layer,
@@ -128,75 +122,57 @@ def get_parameters():
     
     return args, device, blocks
 
-def data_preparate(args, device):    
-    adj, n_vertex = dataloader.load_adj(args)
+def setup_preprocess(args,file_path1,file_path2):
+    adj, n_vertex = fi.load_adj(args)
     gso = utility.calc_gso(adj, args.gso_type)
-    if args.graph_conv_type == 'cheb_graph_conv' or 'OSA':
-        gso = utility.calc_chebynet_gso(gso)
+    gso = utility.calc_chebynet_gso(gso)
     gso = gso.toarray()
     gso = gso.astype(dtype=np.float32)
     args.gso = torch.from_numpy(gso).to(device)
-    #args.dataset = 'metr-la'
+    gso=None
     dataset_path = './data'
-   # if args.dataset != 'seoul':
     dataset_path = os.path.join(dataset_path, args.dataset)
-    data_col = pd.read_csv(os.path.join(dataset_path, 'vel.csv')).shape[0]
-    # recommended dataset split rate as train: val: test = 60: 20: 20, 70: 15: 15 or 80: 10: 10
-    # using dataset split rate as train: val: test = 70: 15: 15
-    val_and_test_rate = 0.15
-    len_val = int(math.floor(data_col * val_and_test_rate))
-    len_test = int(math.floor(data_col * val_and_test_rate))
-    len_train = int(data_col - len_val - len_test)
-    #else:
+    data = fi.FileManager(file_path1,file_path2,args)
+    zscore = fi.DataNormalizer()
+    vel = data.read_chunk(0, 5000, 'vel')
+    zscore.initialize_from_data(vel)
+    data.zscore = zscore
+    x, sol = data.read_chunk_training_batch(0)
+    train_iter=fi.DataLoaderContext(
+        data,    # FileManager 인스턴스로 변경
+        batch_size=args.batch_size,
+        buffer_size=300,
+        shuffle=False,
+        split_ratio=[0.7, 0.15, 0.15],
+        mode="train"     
+    )
+    val_iter=fi.DataLoaderContext(
+        data,    # FileManager 인스턴스로 변경
+        batch_size=args.batch_size,
+        buffer_size=300,
+        shuffle=False,
+        split_ratio=[0.7, 0.15, 0.15],
+        mode="validation"     
+    )
+    test_iter=fi.DataLoaderContext(
+        data,    # FileManager 인스턴스로 변경
+        batch_size=args.batch_size,
+        buffer_size=300,
+        shuffle=False,
+        split_ratio=[0.7, 0.15, 0.15],
+        mode="test"     
+    )
+    print(x[0,0,0,0],sol[0,0,0])
+    return data, args, n_vertex, zscore,train_iter,val_iter,test_iter
 
-    #train, val, test = dataloader.load_data(args.dataset, len_train, len_val)
-    train, val, test = dataloader.load_data(args.dataset, len_train, len_val,options='multi')
-    zscore = preprocessing.StandardScaler()
-    if train.ndim == 3:
-        train[0,:,:] = zscore.fit_transform(train[0,:,:])
-        val[0,:,:]= zscore.transform(val[0,:,:])
-        test[0,:,:] = zscore.transform(test[0,:,:])
-    else:
-        train = zscore.fit_transform(train)
-        val = zscore.transform(val)
-        test = zscore.transform(test)
 
-    if args.graph_conv_type == 'OSA':
-        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred, triple=True, Encoding=args.HotEncoding)
-        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred, triple=True, Encoding=args.HotEncoding)
-        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred, triple=True, Encoding=args.HotEncoding)
-    else:
-        x_train, y_train = dataloader.data_transform(train, args.n_his, args.n_pred)
-        x_val, y_val = dataloader.data_transform(val, args.n_his, args.n_pred)
-        x_test, y_test = dataloader.data_transform(test, args.n_his, args.n_pred)
-    if args.mode == 'train':
-        train_data = utils.data.TensorDataset(x_train, y_train)
-        train_iter = utils.data.DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=False)
-    else:
-        train_iter=None
-        train_data=None
-
-    val_data = utils.data.TensorDataset(x_val, y_val)
-    val_iter = utils.data.DataLoader(dataset=val_data, batch_size=args.batch_size, shuffle=False)
-    test_data = utils.data.TensorDataset(x_test, y_test)
-    test_iter = utils.data.DataLoader(dataset=test_data, batch_size=args.batch_size, shuffle=False)
-
-    return n_vertex, zscore, train_iter, val_iter, test_iter
-
-def prepare_model(args, blocks, n_vertex):
+def setup_model(args, blocks, n_vertex):
     loss = nn.MSELoss()
     es = earlystopping.EarlyStopping(delta=0.0, 
                                      patience=args.patience, 
                                      verbose=True, 
                                      path="./Weight/STGCN_" + args.dataset + args.fname + ".pt")
-
-    if args.graph_conv_type == 'cheb_graph_conv':
-        model = models.STGCNChebGraphConv(args, blocks, n_vertex).to(device)
-    elif args.graph_conv_type == 'OSA':
-        model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex).to(device)
-    else:
-        model = models.STGCNGraphConv(args, blocks, n_vertex).to(device)
-
+    model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex).to(device)
     if args.opt == "adamw":
         optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay_rate)
     elif args.opt == "nadamw":
@@ -205,10 +181,24 @@ def prepare_model(args, blocks, n_vertex):
         optimizer = opt.Lion(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay_rate)
     else:
         raise ValueError(f'ERROR: The {args.opt} optimizer is undefined.')
-
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
-
     return loss, es, model, optimizer, scheduler
+
+@torch.no_grad()
+def val(model, val_iter):
+    model.eval()
+    l_sum, n = 0.0, 0
+    #qq=0
+    with val_iter as queue:
+        batch_fetcher = fi.BatchFetcher(queue)
+        for x, y in tqdm.tqdm(batch_fetcher, total=val_iter.iterations_per_epoch):
+            with autocast(device_type='cuda', dtype=torch.float16):
+                y_pred = model(x).squeeze(1)
+                l = loss(y_pred, y)
+            l_sum += l.item() * y.shape[0]
+            #qq+=1
+            n += y.shape[0]
+    return torch.tensor(l_sum / n)
 
 def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
         # CSV 파일을 "쓰기 모드"로 열고, 필요하다면 헤더를 기록
@@ -222,31 +212,30 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
         with open(csv_path, mode="a", newline="") as f:# CSV 헤더 한 번 작성 (원하면 생략 가능)
             writer = csv.writer(f)
             writer.writerow(["New Epoch", "LR", "TrainLoss", "ValLoss", "GPUMem(MB)"])
-    qq=0
+    
     for epoch in range(args.epochs):
         l_sum, n = 0.0, 0  # 'l_sum' is epoch sum loss, 'n' is epoch instance number
         model.train()
         scaler = GradScaler()
-        for x, y in tqdm.tqdm(train_iter):
-            x, y = x.to(device), y.to(device)
-            optimizer.zero_grad()
-            with autocast(device_type='cuda', dtype=torch.float16):
-                if args.graph_conv_type == 'OSA':
+        #qq=0
+        with train_iter as queue:
+            batch_fetcher = fi.BatchFetcher(queue)
+            for x,y in tqdm.tqdm(batch_fetcher, total=train_iter.iterations_per_epoch,desc='Training'):
+                optimizer.zero_grad()
+                with autocast(device_type='cuda', dtype=torch.float16):
                     y_pred = model(x).squeeze(1)
-                else:# [batch_size, num_nodes, 3]
-                    y_pred = model(x).view(len(x), -1)  # [batch_size, num_nodes]
-                l = loss(y_pred, y)
-            scaler.scale(l).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            l_sum += l.item() * y.shape[0]
-            #print(f"train_loss {qq}: {l.item()}")
-            qq+=1
-            n += y.shape[0]
-            #del x, y_pred,y,l
-            #torch.cuda.empty_cache() 
+                    l = loss(y_pred, y)
+                scaler.scale(l).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                l_sum += l.item() * y.shape[0]
+                #print(f"train_loss {qq}: {l.item()}")
+                #qq+=1
+                n += y.shape[0]
+                #del x, y_pred,y,l
+                #torch.cuda.empty_cache() 
         scheduler.step()
-        val_loss = val(model, val_iter,args)
+        val_loss = val(model, val_iter)
         # GPU memory usage
         gpu_mem_alloc = torch.cuda.max_memory_allocated() / 1000000 if torch.cuda.is_available() else 0
         print('Epoch: {:03d} | Lr: {:.20f} |Train loss: {:.6f} | Val loss: {:.6f} | GPU occupy: {:.6f} MiB'.\
@@ -266,124 +255,89 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
         if es.early_stop:
             print("Early stopping")
             break
-
+        train_iter.reboot()
+        val_iter.reboot()
 @torch.no_grad()
-def val(model, val_iter,args):
-    model.eval()
-
-    l_sum, n = 0.0, 0
-    qq=0
-    for x, y in val_iter:
-        x, y = x.to(device), y.to(device)
-        if args.graph_conv_type == 'OSA':
-            with autocast(device_type='cuda', dtype=torch.float16):
-                y_pred = model(x).squeeze(1)
-                l = loss(y_pred, y)
-
-        else:# [batch_size, num_nodes, 3]
-            y_pred = model(x).view(len(x), -1)  
-            l = loss(y_pred, y)
-        l_sum += l.item() * y.shape[0]
-        #print(f"train_loss {qq}: {l.item()}")
-        qq+=1
-        n += y.shape[0]
-        #del x,y_pred,y,l
-        #torch.cuda.empty_cache() 
-    return torch.tensor(l_sum / n)
-
-
-@torch.no_grad() 
 def test(zscore, loss, model, test_iter, args):
-    model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
-    model.eval()
-
-    test_MSE = utility.evaluate_model(model, loss, test_iter,args,device,zscore)
-    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore, device)
-    print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
-def test2(zscore, loss, model, test_iter, args):
     # Load the model weights
     model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
     model.eval()
-
-    # Evaluate the model
-    test_MSE = utility.evaluate_model(model, loss, test_iter,args,device,zscore)
-    if args.graph_conv_type == 'OSA':
-        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric_OSA(model, test_iter, zscore, device)
-    else:
-        test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(model, test_iter, zscore, device)
-
-    # Prepare CSV output
+    test_MSE = utility.evaluate_model_multi(model, loss, test_iter,args,device,zscore)
+    test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric_OSA_multi(model, test_iter, zscore, device)
+     # CSV 저장 준비
     output_file = f"./Result/test_results_{args.dataset+args.fname}.csv"
-    with open(output_file, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(["Ground Truth", "Prediction"])
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-        max_batches = 16
-        mid_point = args.batch_size // 2
-        first_batch = next(iter(test_iter)) 
-        _, ground_truth = first_batch 
-        ground_truth = ground_truth
-      # CSV 헤더 작성
-        header = []
-        for ch in range(ground_truth.size(1)):  # 채널 수 만큼 반복
-            header.extend([f"CH{ch} Ground Truth", f"CH{ch} Prediction"])
-        writer.writerow(header)
-        for i, batch in enumerate(test_iter):
-            if i >= max_batches:
-                break
-
-            inputs, ground_truth = batch
-            inputs, ground_truth = inputs.to(device), ground_truth.to(device)
-
-            with torch.no_grad():
-                predictions = model(inputs).squeeze(1)
-
-            indices = [0, mid_point]
+    with test_iter as queue:
+        batch_fetcher = fi.BatchFetcher(queue)
+        # 첫 배치로 헤더 정보 얻기
+        for first_batch in batch_fetcher:
+            _, ground_truth = first_batch
+            break
         
-            predictions=predictions.cpu().numpy()
-            ground_truth=ground_truth.cpu().numpy()
-            for i in range(predictions.shape[1]):
-                predictions[:,i,:]=zscore.inverse_transform(predictions[:,i,:])
-                ground_truth[:,i,:]=zscore.inverse_transform(ground_truth[:,i,:])
-
-            for idx in indices:
-                gt_slice = ground_truth[idx, :, :]  # [채널, 피쳐]
-                pred_slice = predictions[idx, :, :]  # [채널, 피쳐]
-
-                # 각 피쳐별로 한 행에 기록
-                for feature_idx in range(gt_slice.shape[1]):  # 피쳐 수 만큼 반복
-                    row = []
-                    for ch in range(gt_slice.shape[0]):  # 채널 수 만큼 반복
-                        row.append(f"{gt_slice[ch, feature_idx]:.6f}")  # Ground Truth
-                        row.append(f"{pred_slice[ch, feature_idx]:.6f}")  # Prediction
-                    writer.writerow(row)
-        
-            #del inputs
-            #del ground_truth
-            #torch.cuda.empty_cache() 
-
+        # CSV 파일 작성
+        with open(output_file, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            
+            # 헤더 작성
+            header = []
+            for ch in range(ground_truth.size(1)):
+                header.extend([f"CH{ch} Ground Truth", f"CH{ch} Prediction"])
+            writer.writerow(header)
+            
+            # 데이터 작성
+            with test_iter as queue:
+                batch_fetcher = fi.BatchFetcher(queue)
+                for batch_idx, (inputs, ground_truth) in enumerate(tqdm.tqdm(batch_fetcher, 
+                                                                total=min(16, test_iter.iterations_per_epoch))):
+                    if batch_idx >= 16:  # max_batches
+                        break
+                        
+                    predictions = model(inputs).squeeze(1)
+                    mid_point = args.batch_size // 2
+                    indices = [0, mid_point]
+                    
+                    # CPU로 이동 및 역정규화
+                    predictions = predictions.cpu().numpy()
+                    ground_truth = ground_truth.cpu().numpy()
+                    
+                    for i in range(predictions.shape[1]):
+                        predictions[:,i,:] = zscore.inverse_transform(predictions[:,i,:])
+                        ground_truth[:,i,:] = zscore.inverse_transform(ground_truth[:,i,:])
+                    
+                    # 선택된 인덱스의 데이터만 저장
+                    for idx in indices:
+                        gt_slice = ground_truth[idx, :, :]
+                        pred_slice = predictions[idx, :, :]
+                        
+                        for feature_idx in range(gt_slice.shape[1]):
+                            row = []
+                            for ch in range(gt_slice.shape[0]):
+                                row.append(f"{gt_slice[ch, feature_idx]:.6f}")
+                                row.append(f"{pred_slice[ch, feature_idx]:.6f}")
+                            writer.writerow(row)
+    
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
     print(f"Test results saved to {output_file}")
     
-    
-
-
-
-
+    return test_MSE, test_MAE, test_RMSE, test_WMAPE
 if __name__ == "__main__":
-    # Logging
-    #logger = logging.getLogger('stgcn')
-    #logging.basicConfig(filename='stgcn.log', level=logging.INFO)
     logging.basicConfig(level=logging.INFO)
-
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
-
+    
     args, device, blocks = get_parameters()
-    n_vertex, zscore, train_iter, val_iter, test_iter = data_preparate(args, device)
-    loss, es, model, optimizer, scheduler = prepare_model(args, blocks, n_vertex)
+    
+    vel_path = f"./data/{args.dataset}/speed_matrix.h5"
+    weight_path = f"./data/{args.dataset}/weight_matrix.h5"
+    
+    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path)
+    loss, es, model, optimizer, scheduler = setup_model(args, blocks, n_vertex)
+    x,y=data.read_chunk_training_batch(0)
+    print(x.shape,y.shape)
     if args.mode == 'train':
-        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)# 모델평가만 원할때 추석처리
-    #test2(zscore, loss, model, val_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
-    test2(zscore, loss, model, test_iter, args) # 모델 평가시 csv로 ground truth 와 prediction 저장 원할 시 사용
-    #test(zscore, loss, model, test_iter, args) # 평가 결과면 원할 시 사용
+        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)
+    test(zscore, loss, model, test_iter, args)
+    test_iter.close()
+    val_iter.close()
+    train_iter.close()

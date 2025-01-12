@@ -1,1 +1,31 @@
 Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,18.377388,28.260263,5436.52
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+2,0.0001,0.651016,0.777055,4501.98
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,0.0001,0.786275,0.910243,4499.91
+2,0.0001,0.651016,0.777055,4503.62
+3,0.0001,0.589370,0.656804,4504.56

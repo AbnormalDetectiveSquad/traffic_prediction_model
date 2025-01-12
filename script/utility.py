@@ -3,7 +3,8 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import norm
 import torch
 import csv
-
+import tqdm
+from . import file_input as fi
 def calc_gso(dir_adj, gso_type):
     n_vertex = dir_adj.shape[0]
 
@@ -152,9 +153,48 @@ def evaluate_model(model, loss, data_iter,args,device,zscore):
                 l = loss(y_pred, y)
                 l_sum += l.item() * y.shape[0]
                 n += y.shape[0]
-        mse = l_sum / n
+    mse = l_sum / n
         
-        return mse
+    return mse
+@torch.no_grad()
+def evaluate_model_multi(model, loss, data_iter,args,device,zscore):
+    model.eval()
+    l_sum, n = 0.0, 0
+    with torch.no_grad():
+        qq=0
+        high=0
+        good=0
+        with open('Loss.csv', mode='w', newline='') as file:
+            writer= csv.writer(file)
+            writer.writerow(['Batch_num', 'Loss'])
+        with data_iter as queue:
+            batch_fetcher = fi.BatchFetcher(queue)
+            for x, y in tqdm.tqdm(batch_fetcher, total=data_iter.iterations_per_epoch):
+                x = x.to(device)
+                y = y.to(device)
+                y_pred = model(x).squeeze(1)
+                l = loss(y_pred, y)
+
+                '''
+                if (qq>=0)&(qq<=1000):
+                    debug_save(qq,x,y,'bad',zscore,sol=y_pred)
+                    high+=1
+                if (qq>=300)&(qq<=326):
+                    debug_save(qq,x,y,'good',zscore,sol=y_pred)
+                    good+=1
+                '''
+                '''
+                with open('LossT.csv', mode='a', newline='') as file:
+                    writer= csv.writer(file)
+                    writer.writerow([qq, l.item()])
+                qq+=1
+                '''
+                l_sum += l.item() * (y.numel()/3)  # 배치 평균 손실에 배치 크기를 곱함
+
+                n += (y.numel()/3)  # 총 데이터 개수 누적
+    mse = l_sum / n
+        
+    return mse
 
 def evaluate_metric(model, data_iter, scaler, device):
     model.eval()
@@ -202,5 +242,34 @@ def evaluate_metric_OSA(model, data_iter, scaler, device):
         RMSE = np.sqrt(np.array(mse).mean())
         WMAPE = np.sum(np.array(mae)) / np.sum(np.array(sum_y))
 
-        #return MAE, MAPE, RMSE
-        return MAE, RMSE, WMAPE
+    #return MAE, MAPE, RMSE
+    return MAE, RMSE, WMAPE
+@torch.no_grad()
+def evaluate_metric_OSA_multi(model, data_iter, scaler, device):
+    model.eval()
+    with torch.no_grad():
+        mae, sum_y, mape, mse = [], [], [], []
+        with data_iter as queue:
+            batch_fetcher = fi.BatchFetcher(queue)
+            for x, y in tqdm.tqdm(batch_fetcher, total=data_iter.iterations_per_epoch):
+                x=x.to(device)
+                y_pred=model(x).squeeze(1).cpu().numpy()
+                y=y.numpy()
+                for i in range(y_pred.shape[1]):
+                    y_pred[:,i,:]=scaler.inverse_transform(y_pred[:,i,:])
+                    y[:,i,:]=scaler.inverse_transform(y[:,i,:])
+
+                y = y.reshape(-1)
+                y_pred = y_pred.reshape(-1)
+                d = np.abs(y - y_pred)
+                mae += d.tolist()
+                sum_y += y.tolist()
+                mape += (d / (y+1e-10)).tolist()
+                mse += (d ** 2).tolist()
+            MAE = np.array(mae).mean()
+            #MAPE = np.array(mape).mean()
+            RMSE = np.sqrt(np.array(mse).mean())
+            WMAPE = np.sum(np.array(mae)) / np.sum(np.array(sum_y))
+
+    #return MAE, MAPE, RMSE
+    return MAE, RMSE, WMAPE
