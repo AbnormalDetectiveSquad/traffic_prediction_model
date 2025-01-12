@@ -83,7 +83,7 @@ def get_parameters():
     parser.add_argument('--fname', type=str, default='K460_16base_S220samp_seq_lr0.0001_0112p', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
-    
+    parser.add_argument('--Continue', type=str, default="True", help='True or False')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -172,7 +172,11 @@ def setup_model(args, blocks, n_vertex):
                                      patience=args.patience, 
                                      verbose=True, 
                                      path="./Weight/STGCN_" + args.dataset + args.fname + ".pt")
-    model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex).to(device)
+    if args.Conitnue == "True":
+        model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex)
+        model = torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt").to(device)
+    else:
+        model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex).to(device)
     if args.opt == "adamw":
         optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay_rate)
     elif args.opt == "nadamw":
@@ -338,7 +342,8 @@ if __name__ == "__main__":
     print(x.shape,y.shape)
     if args.mode == 'train':
         train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)
-    test(zscore, loss, model, test_iter, args)
-    test_iter.close()
     val_iter.close()
     train_iter.close()
+    test(zscore, loss, model, test_iter, args)
+    test_iter.close()
+

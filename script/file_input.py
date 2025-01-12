@@ -9,6 +9,7 @@ import os
 import scipy.sparse as sp
 import pandas as pd
 import tqdm
+import time
 class DataLoaderContext:
     def __init__(
         self,
@@ -83,7 +84,7 @@ class DataLoaderContext:
         """데이터를 읽어 큐에 배치를 넣음"""
         start_idx, end_idx = self.current_range
         current_pos = start_idx
-        pbar = tqdm.tqdm(total=end_idx - start_idx, desc='Filling queue')
+        #pbar = tqdm.tqdm(total=end_idx - start_idx, desc='Filling queue')
         while current_pos < end_idx:
             if self.stop_event.is_set():
                 break
@@ -96,10 +97,11 @@ class DataLoaderContext:
             self.data_queue.put((x, y))
             
             current_pos += self.batch_size
-            pbar.update(self.batch_size)
-            pbar.set_postfix({'queue': f'{self.data_queue.qsize()}/{self.buffer_size}'})
+            time.sleep(10e-3) 
+            #pbar.update(self.batch_size)
+            #pbar.set_postfix({'queue': f'{self.data_queue.qsize()}/{self.buffer_size}'})
 
-        pbar.close()  
+        #pbar.close()  
         self.data_queue.put(None)# 에포크 종료 신호
     def __enter__(self):
         """스레드 시작"""
