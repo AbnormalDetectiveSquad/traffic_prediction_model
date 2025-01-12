@@ -255,7 +255,7 @@ def evaluate_metric_OSA_multi(model, data_iter, scaler, device):
                 x=torch.tensor(x, dtype=torch.float32)
                 y=torch.tensor(y, dtype=torch.float32)
                 y_pred=model(x).squeeze(1).cpu().numpy()
-                y=y.numpy()
+                y=y.cpu().numpy()
                 for i in range(y_pred.shape[1]):
                     y_pred[:,i,:]=scaler.inverse_transform(y_pred[:,i,:])
                     y[:,i,:]=scaler.inverse_transform(y[:,i,:])

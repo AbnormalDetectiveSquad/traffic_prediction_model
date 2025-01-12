@@ -13,12 +13,13 @@ import time
 class DataLoaderContext:
     def __init__(
         self,
-        file_manager,    # FileManager 인스턴스로 변경
+        file_manager,
+        args,    # FileManager 인스턴스로 변경
         batch_size=16,
         buffer_size=300,
         shuffle=False,
         split_ratio=[0.7, 0.15, 0.15],
-        mode="train"     # 초기 모드 지정
+        mode="train",     # 초기 모드 지정
     ):
         """
         HDF5 파일에서 데이터를 로드하는 컨텍스트 관리자
@@ -46,11 +47,9 @@ class DataLoaderContext:
         train_end = int(total_size * train_ratio)
         val_end = train_end + int(total_size * val_ratio)
         self.mode=mode
-        self.ranges = {
-            "train": (0, train_end),
-            "validation": (train_end, val_end),
-            "test": (val_end, total_size)
-        }
+        self.n_his = args.n_his
+        self.n_pred = args.n_pred
+        self._calculate_ranges(total_size)
         
         # 큐와 스레드 설정
         self.data_queue = queue.Queue(maxsize=buffer_size)
@@ -72,7 +71,24 @@ class DataLoaderContext:
         self.stop_event.clear()
         self.producer_thread = None
         self.data_queue = queue.Queue(maxsize=self.buffer_size)
-
+    def _calculate_ranges(self, total_size):
+        train_ratio, val_ratio, test_ratio = self.split_ratio
+        
+        # 각 시퀀스에 필요한 최소 길이
+        sequence_length = self.batch_size + self.n_his + self.n_pred - 1
+        
+        # 나눌 수 있는 최대 시퀀스 수 계산
+        usable_size = total_size - sequence_length + 1
+        
+        # 비율에 맞게 나누기
+        train_end = int(usable_size * train_ratio)
+        val_end = train_end + int(usable_size * val_ratio)
+        
+        self.ranges = {
+            "train": (0, train_end),
+            "validation": (train_end, val_end),
+            "test": (val_end, usable_size)
+        }
 
     def set_mode(self, mode):
         """훈련, 검증, 테스트 모드 설정"""
@@ -93,7 +109,7 @@ class DataLoaderContext:
                 break
                 
             # FileManager를 통해 배치 데이터 읽기
-            x, y = self.file_manager.read_chunk_training_batch(current_pos)
+            x, y = self.file_manager.read_chunk_training_batch(current_pos)# ddddddddddddddd
             self.data_queue.put((x, y))
             
             current_pos += self.batch_size
@@ -210,6 +226,8 @@ class DataNormalizer:
 
 class FileManager: 
     def __init__(self, filepath1,filepath2,args,zscore=None):
+        self.filepath1 = filepath1
+        self.filepath2 = filepath2
         self.vel = h5py.File(filepath1, "r")
         self.weight = h5py.File(filepath2, "r")
         self.final_position = 0
@@ -263,31 +281,43 @@ class FileManager:
             raise ValueError("please input the zscore")
         # 한번에 연속된 범위로 데이터 로드
         end_pos = start_pos + self.args.batch_size + self.args.n_his + self.args.n_pred - 1
-        data_vel = self.vel[list(self.vel.keys())[0]][start_pos:end_pos]
-        data_weight = self.weight[list(self.weight.keys())[0]][start_pos:end_pos]
-        
-        # 배치별로 데이터 만들기
-        Result_x = np.zeros([self.args.batch_size, 2, self.args.n_his, self.width])
-        Result_y = np.zeros([self.args.batch_size, self.args.n_pred, self.width])
-        
-        for i in range(self.args.batch_size):
-            # 각 배치의 시작점
-            idx = i
+        try:
+            if not self.vel.id.valid:
+                self.vel = h5py.File(self.filepath1, "r")
+            if not self.weight.id.valid:
+                self.weight = h5py.File(self.filepath2, "r")
+            data_vel = self.vel[list(self.vel.keys())[0]][start_pos:end_pos]
+            data_weight = self.weight[list(self.weight.keys())[0]][start_pos:end_pos]
             
-            # 입력 데이터 준비
-            x_vel = data_vel[idx:idx + self.args.n_his]
-            x_weight = data_weight[idx:idx + self.args.n_his]
-            y_sol = data_vel[idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred]
-            
-            # 정규화
-            x_vel = self.zscore.transform(x_vel)
-            y_sol = self.zscore.transform(y_sol)
-            
-            # 결과 저장
-            Result_x[i, 0] = x_vel
-            Result_x[i, 1] = x_weight
-            Result_y[i] = y_sol
-        
+            # 배치별로 데이터 만들기
+            Result_x = np.zeros([self.args.batch_size, 2, self.args.n_his, self.width])
+            Result_y = np.zeros([self.args.batch_size, self.args.n_pred, self.width])
+        except Exception as e:
+            print(f"Error at position {start_pos}, attempting to reopen files")
+        try:
+            for i in range(self.args.batch_size):
+                # 각 배치의 시작점
+                idx = i
+                
+                # 입력 데이터 준비
+                x_vel = data_vel[idx:idx + self.args.n_his]
+                x_weight = data_weight[idx:idx + self.args.n_his]
+                y_sol = data_vel[idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred]
+                
+                # 정규화
+                x_vel = self.zscore.transform(x_vel)
+                y_sol = self.zscore.transform(y_sol)
+                
+                # 결과 저장
+                Result_x[i, 0] = x_vel
+                Result_x[i, 1] = x_weight
+                Result_y[i] = y_sol
+        except Exception as e:
+            print(f"Error in batch {i}")
+            print(f"y_sol shape: {y_sol.shape if 'y_sol' in locals() else 'not created'}")
+            print(f"Result_y shape: {Result_y.shape}")
+            raise e
+    
         return torch.tensor(Result_x, dtype=torch.float16).to(self.device), torch.tensor(Result_y, dtype=torch.float16).to(self.device)
 
 

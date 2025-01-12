@@ -81,7 +81,7 @@ def get_parameters():
   
 
     parser.add_argument('--fname', type=str, default='K460_16base_S220samp_seq_lr0.0001_0112p', help='name')
-    parser.add_argument('--mode', type=str, default='train', help='test or train')
+    parser.add_argument('--mode', type=str, default='test', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
@@ -140,6 +140,7 @@ def setup_preprocess(args,file_path1,file_path2):
     x, sol = data.read_chunk_training_batch(0)
     train_iter=fi.DataLoaderContext(
         data,    # FileManager 인스턴스로 변경
+        args,
         batch_size=args.batch_size,
         buffer_size=300,
         shuffle=False,
@@ -147,7 +148,8 @@ def setup_preprocess(args,file_path1,file_path2):
         mode="train"     
     )
     val_iter=fi.DataLoaderContext(
-        data,    # FileManager 인스턴스로 변경
+        data,
+        args,    # FileManager 인스턴스로 변경
         batch_size=args.batch_size,
         buffer_size=300,
         shuffle=False,
@@ -156,6 +158,7 @@ def setup_preprocess(args,file_path1,file_path2):
     )
     test_iter=fi.DataLoaderContext(
         data,    # FileManager 인스턴스로 변경
+        args,
         batch_size=args.batch_size,
         buffer_size=300,
         shuffle=False,
@@ -194,8 +197,8 @@ def setup_model(args, blocks, n_vertex):
     else:
         raise ValueError(f'ERROR: The {args.opt} optimizer is undefined.')
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     if checkpoint is not None:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if scheduler and 'scheduler_state_dict' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch']
@@ -279,14 +282,21 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,star
 @torch.no_grad()
 def test(zscore, loss, model, test_iter, args):
     # Load the model weights
-    model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
+    #model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
+    
+
+    checkpoint_path = "./Weight/STGCN_" + args.dataset + args.fname + ".pt"
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
+    test_iter.reboot()
     test_MSE = utility.evaluate_model_multi(model, loss, test_iter,args,device,zscore)
+    test_iter.reboot()
     test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric_OSA_multi(model, test_iter, zscore, device)
      # CSV 저장 준비
     output_file = f"./Result/test_results_{args.dataset+args.fname}.csv"
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
+    test_iter.reboot()
     with test_iter as queue:
         batch_fetcher = fi.BatchFetcher(queue)
         # 첫 배치로 헤더 정보 얻기
@@ -311,7 +321,7 @@ def test(zscore, loss, model, test_iter, args):
                                                                 total=min(16, test_iter.iterations_per_epoch))):
                     if batch_idx >= 16:  # max_batches
                         break
-                    input=torch.tensor(input,dtype=torch.float32)
+                    inputs=torch.tensor(inputs,dtype=torch.float32)
                     ground_truth=torch.tensor(ground_truth,dtype=torch.float32)
                     predictions = model(inputs).squeeze(1)
                     mid_point = args.batch_size // 2
@@ -357,8 +367,8 @@ if __name__ == "__main__":
     print(x.shape,y.shape)
     if args.mode == 'train':
         train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
-    val_iter.close()
-    train_iter.close()
+    val_iter.file_manager.__del__()
+    train_iter.file_manager.__del__()
     test(zscore, loss, model, test_iter, args)
-    test_iter.close()
+    test_iter.file_manager.__del__()
 
