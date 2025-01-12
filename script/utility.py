@@ -170,8 +170,8 @@ def evaluate_model_multi(model, loss, data_iter,args,device,zscore):
         with data_iter as queue:
             batch_fetcher = fi.BatchFetcher(queue)
             for x, y in tqdm.tqdm(batch_fetcher, total=data_iter.iterations_per_epoch):
-                x = x.to(device)
-                y = y.to(device)
+                x=torch.tensor(x, dtype=torch.float32)
+                y=torch.tensor(y, dtype=torch.float32)
                 y_pred = model(x).squeeze(1)
                 l = loss(y_pred, y)
 
@@ -252,7 +252,8 @@ def evaluate_metric_OSA_multi(model, data_iter, scaler, device):
         with data_iter as queue:
             batch_fetcher = fi.BatchFetcher(queue)
             for x, y in tqdm.tqdm(batch_fetcher, total=data_iter.iterations_per_epoch):
-                x=x.to(device)
+                x=torch.tensor(x, dtype=torch.float32)
+                y=torch.tensor(y, dtype=torch.float32)
                 y_pred=model(x).squeeze(1).cpu().numpy()
                 y=y.numpy()
                 for i in range(y_pred.shape[1]):

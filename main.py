@@ -292,7 +292,8 @@ def test(zscore, loss, model, test_iter, args):
                                                                 total=min(16, test_iter.iterations_per_epoch))):
                     if batch_idx >= 16:  # max_batches
                         break
-                        
+                    input=torch.tensor(input,dtype=torch.float32)
+                    ground_truth=torch.tensor(ground_truth,dtype=torch.float32)
                     predictions = model(inputs).squeeze(1)
                     mid_point = args.batch_size // 2
                     indices = [0, mid_point]

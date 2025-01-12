@@ -78,31 +78,6 @@ class DataLoaderContext:
         if mode not in self.ranges:
             raise ValueError("Invalid mode. Choose from ['train', 'validation', 'test']")
         self.current_range = self.ranges[mode]
-    def _producer_32(self):
-        """데이터를 읽어 큐에 배치를 넣음"""
-        start_idx, end_idx = self.current_range
-        current_pos = start_idx
-        pbar = tqdm.tqdm(total=end_idx - start_idx, desc='Filling queue')
-        while current_pos < end_idx:
-            if self.stop_event.is_set():
-                break
-                
-            if current_pos + self.batch_size > end_idx:
-                break
-                
-            # FileManager를 통해 배치 데이터 읽기
-            x, y = self.file_manager.read_chunk_training_batch_32(current_pos)
-            self.data_queue.put((x, y))
-            
-            current_pos += self.batch_size
-            pbar.update(self.batch_size)
-            pbar.set_postfix({'queue': f'{self.data_queue.qsize()}/{self.buffer_size}'})
-
-        pbar.close()  
-        self.data_queue.put(None)# 에포크 종료 신호
-
-
-
 
     def _producer(self):
         """데이터를 읽어 큐에 배치를 넣음"""
@@ -128,10 +103,8 @@ class DataLoaderContext:
         self.data_queue.put(None)# 에포크 종료 신호
     def __enter__(self):
         """스레드 시작"""
-        if self.mode == 'test':
-            self.producer_thread = threading.Thread(target=self._producer_32, daemon=True)
-        else:
-            self.producer_thread = threading.Thread(target=self._producer, daemon=True)
+ 
+        self.producer_thread = threading.Thread(target=self._producer, daemon=True)
 
         self.producer_thread.start()
         return self.data_queue
@@ -314,39 +287,6 @@ class FileManager:
             Result_y[i] = y_sol
         
         return torch.tensor(Result_x, dtype=torch.float16).to(self.device), torch.tensor(Result_y, dtype=torch.float16).to(self.device)
-
-    def read_chunk_training_batch_32(self, start_pos):
-        if self.zscore is None:
-            raise ValueError("please input the zscore")
-        # 한번에 연속된 범위로 데이터 로드
-        end_pos = start_pos + self.args.batch_size + self.args.n_his + self.args.n_pred - 1
-        data_vel = self.vel[list(self.vel.keys())[0]][start_pos:end_pos]
-        data_weight = self.weight[list(self.weight.keys())[0]][start_pos:end_pos]
-        
-        # 배치별로 데이터 만들기
-        Result_x = np.zeros([self.args.batch_size, 2, self.args.n_his, self.width])
-        Result_y = np.zeros([self.args.batch_size, self.args.n_pred, self.width])
-        
-        for i in range(self.args.batch_size):
-            # 각 배치의 시작점
-            idx = i
-            
-            # 입력 데이터 준비
-            x_vel = data_vel[idx:idx + self.args.n_his]
-            x_weight = data_weight[idx:idx + self.args.n_his]
-            y_sol = data_vel[idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred]
-            
-            # 정규화
-            x_vel = self.zscore.transform(x_vel)
-            y_sol = self.zscore.transform(y_sol)
-            
-            # 결과 저장
-            Result_x[i, 0] = x_vel
-            Result_x[i, 1] = x_weight
-            Result_y[i] = y_sol
-        
-        return torch.tensor(Result_x, dtype=torch.float32).to(self.device), torch.tensor(Result_y, dtype=torch.float32).to(self.device)
-
 
 
 def load_adj(arg):  
