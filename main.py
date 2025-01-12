@@ -83,7 +83,7 @@ def get_parameters():
     parser.add_argument('--fname', type=str, default='K460_16base_S220samp_seq_lr0.0001_0112p', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
-    parser.add_argument('--Continue', type=str, default="True", help='True or False')
+    parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
     print('Training configs: {}'.format(args))
 
@@ -172,10 +172,18 @@ def setup_model(args, blocks, n_vertex):
                                      patience=args.patience, 
                                      verbose=True, 
                                      path="./Weight/STGCN_" + args.dataset + args.fname + ".pt")
-    if args.Conitnue == "True":
-        model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex)
-        model = torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt").to(device)
+    start_epoch = 0
+    best_val_loss = float('inf')
+    
+    if args.Continue == "True":
+        model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex).to(device)
+        checkpoint_path = "./Weight/STGCN_" + args.dataset + args.fname + ".pt"
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+        print(f"Loaded weights from {checkpoint_path}")
     else:
+        checkpoint=None
         model = models.STGCNChebGraphConv_OSA(args, blocks, n_vertex).to(device)
     if args.opt == "adamw":
         optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay_rate)
@@ -186,7 +194,14 @@ def setup_model(args, blocks, n_vertex):
     else:
         raise ValueError(f'ERROR: The {args.opt} optimizer is undefined.')
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
-    return loss, es, model, optimizer, scheduler
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if checkpoint is not None:
+        if scheduler and 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch']
+        best_val_loss = checkpoint['val_loss']
+    es.val_loss_min = best_val_loss
+    return loss, es, model, optimizer, scheduler ,start_epoch, best_val_loss
 
 @torch.no_grad()
 def val(model, val_iter):
@@ -204,7 +219,7 @@ def val(model, val_iter):
             n += y.shape[0]
     return torch.tensor(l_sum / n)
 
-def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
+def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss):
         # CSV 파일을 "쓰기 모드"로 열고, 필요하다면 헤더를 기록
     # - 'w'를 쓰면 매번 덮어씌워집니다. 이미 파일이 있으면 'a'로 열어 이어쓰기 가능
     csv_path=f"./Log/train_log_{args.dataset+args.fname}.csv"
@@ -217,7 +232,7 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
             writer = csv.writer(f)
             writer.writerow(["New Epoch", "LR", "TrainLoss", "ValLoss", "GPUMem(MB)"])
     
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         l_sum, n = 0.0, 0  # 'l_sum' is epoch sum loss, 'n' is epoch instance number
         model.train()
         scaler = GradScaler()
@@ -255,7 +270,7 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter):
                 f"{gpu_mem_alloc:.2f}"
             ])
             print("csv data saved")
-        es(val_loss, model)
+        es(val_loss, model, optimizer, scheduler, epoch)
         if es.early_stop:
             print("Early stopping")
             break
@@ -337,11 +352,11 @@ if __name__ == "__main__":
     weight_path = f"./data/{args.dataset}/weight_matrix.h5"
     
     data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path)
-    loss, es, model, optimizer, scheduler = setup_model(args, blocks, n_vertex)
+    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex)
     x,y=data.read_chunk_training_batch(0)
     print(x.shape,y.shape)
     if args.mode == 'train':
-        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter)
+        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
     val_iter.close()
     train_iter.close()
     test(zscore, loss, model, test_iter, args)

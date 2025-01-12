@@ -3,7 +3,7 @@ import torch
 
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
-    def __init__(self, delta: float = 0.0, patience: int = 7, verbose: bool = True, path: str = 'checkpoint.pt'):
+    def __init__(self, delta: float = 0.0, patience: int = 7, verbose: bool = True, path: str = 'checkpoint.pt',best_val_loss=float('inf')):
         """
         Args:
             patience (int): How long to wait after last time validation loss improved.
@@ -20,7 +20,7 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = math.inf
+        self.val_loss_min = best_val_loss
         self.delta = delta
         self.path = path
 
@@ -41,8 +41,17 @@ class EarlyStopping:
             self.save_checkpoint(val_loss, model)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
+    def save_checkpoint(self, val_loss, model, optimizer, scheduler, epoch):
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.4f} --> {val_loss:.4f}). Saving model...')
-        torch.save(model.state_dict(), self.path)
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+            'val_loss': val_loss,
+            'best_score': self.best_score,
+            'counter': self.counter
+        }, self.path)
+
         self.val_loss_min = val_loss
