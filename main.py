@@ -111,8 +111,7 @@ def get_parameters(config=None):
     else:
         # Initialize WandB for non-sweep runs
         wandb.login()
-        wandb.init(project="traffic prediction", config=vars(args),mode="offline")
-        #wandb.init(project="traffic prediction", config=vars(args))
+        wandb.init(project="traffic_prediction_off_line_project", config=vars(args),mode="offline")
         wandb.config.update(vars(args), allow_val_change=True)
     print('Training configs: {}'.format(args))
 
@@ -408,7 +407,7 @@ def setup_sweep():
             "complexity": {"values": [4,8,16,32]},
         },
         }
-    sweep_id = wandb.sweep(sweep_config, project="traffic prediction")
+    sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_off_line_project")
     return sweep_id
 
 def main(config=None):
