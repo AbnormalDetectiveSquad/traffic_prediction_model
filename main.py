@@ -397,13 +397,13 @@ def setup_sweep():
         "method": "random",
         "metric": {"name": "val_loss", "goal": "minimize"},
         "parameters": {
-            "learning_rate": {"min": 0.000001, "max": 0.001, "distribution": "log_uniform"},
+            "lr": {"min": 0.000001, "max": 0.001, "distribution": "log_uniform"},
             "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
             "batch_size": {"values": [8,16, 32, 64]},
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
-            "L2 penalty": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
+            "weight_decay_rate": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
             "k_threshold" : {"min": 200.0, "max": 550.0, "distribution": "uniform"},
-            "chennal": {"values": [4,8,16,32]},
+            "complexity": {"values": [4,8,16,32]},
         },
         }
     sweep_id = wandb.sweep(sweep_config, project="traffic prediction")
