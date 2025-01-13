@@ -9,6 +9,7 @@ import geopandas as gpd
 from tqdm import tqdm
 import h5py
 from main_old import get_parameters
+import matplotlib.pyplot as plt 
 
 def validate_and_create_pivot_table(combined_data):
     # 중복 데이터 확인
@@ -33,7 +34,7 @@ def validate_and_create_pivot_table(combined_data):
     pivot_data = pivot_data.sort_index()
     
     return pivot_data
-def get_files_list(number,option='non-holidays',start=None, data_dir='/home/kfe-shim/extract_its_data'):
+def get_files_list(number,option='non-holidays',start=None, data_dir='/home/ssy/extract_its_data'):
     # 파일 리스트 가져오기
     all_files = [f for f in os.listdir(data_dir) if f.endswith('_5Min.csv')]
     if option == 'all':
@@ -357,37 +358,23 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
     mapping_table = pd.read_csv(mapping_file_path)
     print(f"Loaded mapping table with {len(mapping_table)} entries.")
     link_order = mapping_table.sort_values('Matrix_Index')['Link_ID'].tolist()
-    
+    num_columns=len(link_order)
     # HDF5 파일 열기 (추가 모드)
-    speed_h5_path = os.path.join(dataset_path, 'speed_matrix.h5')
-    weight_h5_path = os.path.join(dataset_path, 'weight_matrix.h5')
-    
-    with h5py.File(speed_h5_path, 'a') as speed_hf, h5py.File(weight_h5_path, 'w') as weight_hf:
-        num_columns = len(link_order)  # 열 수를 link_order 길이로 설정
+    featuresmat_h5_path = os.path.join(dataset_path, 'features_matrix.h5')
 
-        # speed_matrix 데이터셋 확인 및 생성
-        if 'speed_matrix' not in speed_hf:
-            speed_dataset = speed_hf.create_dataset(
-                'speed_matrix',
-                shape=(0, num_columns),
-                maxshape=(None, num_columns),
-                chunks=(1000, num_columns),  # 청크 크기 설정
-                dtype='float32'
-            )
-        else:
-            speed_dataset = speed_hf['speed_matrix']
+    with h5py.File(featuresmat_h5_path, 'w') as speed_hf:
+        # 특성의 개수 (speed와 weight, 총 2개)
+        num_features = 5
 
-        # weight_matrix 데이터셋 확인 및 생성
-        if 'weight_matrix' not in weight_hf:
-            weight_dataset = weight_hf.create_dataset(
-                'weight_matrix',
-                shape=(0, num_columns),
-                maxshape=(None, num_columns),
-                chunks=(1000, num_columns),  # 청크 크기 설정
-                dtype='float32'
-            )
-        else:
-            weight_dataset = weight_hf['weight_matrix']
+        feature_dataset = speed_hf.create_dataset(
+            'features_matrix',
+            shape=(num_features, 0, num_columns),  # 초기 크기: [특성, 시간=0, 노드 수]
+            maxshape=(num_features, None, num_columns),  # 최대 크기: [특성, 무제한 시간, 노드 수]
+            chunks=(num_features, 1000, num_columns),  # 청크 크기 설정: [특성, 시간 배치, 노드 수]
+            dtype='float32'
+        )
+        print("New features_matrix dataset created.")
+
         
         # 배치 크기 설정
         BATCH_SIZE = 10  # 한 번에 처리할 파일 수
@@ -399,7 +386,9 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
             batch_files = file_list[i:i + BATCH_SIZE]
             batch_data_speed = []
             batch_data_weight = []
-            
+            batch_data_date=[]
+            batch_data_time=[]
+            batch_data_weather=[]
             for f in batch_files:
                 file_path = os.path.join(data_dir, f)
                 
@@ -415,6 +404,9 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
                     # 필요한 열만 유지 및 정렬
                     data = data[['Link_ID', 'Date', 'Time', 'Avg_Speed']]
                     data = data.sort_values(by=['Date', 'Time'])
+                    data=add_ptime_column(data)
+                    data=add_pdate_column(data)
+                    
                     
                     # 데이터 변환
                     pivot_speed = data.pivot_table(
@@ -425,10 +417,11 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
                         fill_value=0
                     ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
 
-                    # 가중치 계산 (예시, 실제 로직에 맞게 수정 필요)
+
                     combined_batch = data.copy()
                     combined_batch['Date'] = pd.to_datetime(combined_batch['Date'].astype(str), format='%Y%m%d')
                     combined_batch['Weight'] = calculate_weight_vectorized(combined_batch['Date'])
+                    combined_batch['Weather'] = calculate_weight_vectorized(combined_batch['Date'])
                     pivot_weight = combined_batch.pivot_table(
                         index=['Date', 'Time'],
                         columns='Link_ID',
@@ -436,9 +429,33 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
                         aggfunc='mean',
                         fill_value=0
                     ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
+                    pivot_date = combined_batch.pivot_table(
+                        index=['Date', 'Time'],
+                        columns='Link_ID',
+                        values='Pdate',
+                        aggfunc='mean',
+                        fill_value=0
+                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
+                    pivot_time = combined_batch.pivot_table(
+                        index=['Date', 'Time'],
+                        columns='Link_ID',
+                        values='Ptime',
+                        aggfunc='mean',
+                        fill_value=0
+                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
+                    pivot_weather = combined_batch.pivot_table(
+                        index=['Date', 'Time'],
+                        columns='Link_ID',
+                        values='Weather',
+                        aggfunc='mean',
+                        fill_value=0
+                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
                     
                     batch_data_speed.append(pivot_speed)
                     batch_data_weight.append(pivot_weight)
+                    batch_data_date.append(pivot_date)
+                    batch_data_time.append(pivot_time)
+                    batch_data_weather.append(pivot_weather)
                     processed_files.append(f)
                 except Exception as e:
                     print(f"Error processing file {f}: {str(e)}")
@@ -447,20 +464,17 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
             if not batch_data_speed or not batch_data_weight:
                 continue
             
-            # 배치 데이터 합치기
-            batch_speed_array = np.vstack(batch_data_speed)
-            batch_weight_array = np.vstack(batch_data_weight)
-            
-            # 기존 데이터셋에 배치 추가
-            current_speed_rows = speed_dataset.shape[0]
-            new_speed_rows = batch_speed_array.shape[0]
-            speed_dataset.resize((current_speed_rows + new_speed_rows, speed_dataset.shape[1]))
-            speed_dataset[current_speed_rows:current_speed_rows + new_speed_rows, :] = batch_speed_array
-            
-            current_weight_rows = weight_dataset.shape[0]
-            new_weight_rows = batch_weight_array.shape[0]
-            weight_dataset.resize((current_weight_rows + new_weight_rows, weight_dataset.shape[1]))
-            weight_dataset[current_weight_rows:current_weight_rows + new_weight_rows, :] = batch_weight_array
+            # 배치 데이터 준비
+            batch_speed_array = np.expand_dims(np.vstack(batch_data_speed), axis=0)  # [1, 시간, 노드]
+            batch_weight_array = np.expand_dims(np.vstack(batch_data_weight), axis=0)  # [1, 시간, 노드]
+            batch_date_array= np.expand_dims(np.vstack(batch_data_date), axis=0)
+            batch_time_array= np.expand_dims(np.vstack(batch_data_time), axis=0)
+            batch_weather_array= np.expand_dims(np.vstack(batch_data_weather), axis=0)
+            batch_feature_array = np.concatenate([batch_speed_array, batch_weight_array,batch_date_array,batch_time_array,batch_weather_array], axis=0)  # [2, 시간, 노드]            
+            current_time_rows = feature_dataset.shape[1]
+            new_time_rows = batch_feature_array.shape[1]
+            feature_dataset.resize((num_features, current_time_rows + new_time_rows, feature_dataset.shape[2]))
+            feature_dataset[:, current_time_rows:current_time_rows + new_time_rows, :] = batch_feature_array
             
             # 메모리 정리
             del batch_data_speed, batch_data_weight, batch_speed_array, batch_weight_array
@@ -469,6 +483,31 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
         file_list_path = os.path.join(dataset_path, 'processed_files.txt')
         with open(file_list_path, 'w') as file_list_f:
             file_list_f.write("\n".join(processed_files))
+
+def add_ptime_column(df):
+    def hhmm_to_minutes(hhmm):
+        hours = hhmm // 100  # HH 부분
+        minutes = hhmm % 100  # MM 부분
+        time_minutes=hours * 60 + minutes
+        return  np.sin((time_minutes / 1440) * 2 * np.pi)
+    df['Ptime'] = df['Time'].apply(hhmm_to_minutes)
+    return df
+def add_pdate_column(df):
+    def date_to_sine_or_zero(date):
+        # 월과 일을 추출
+        month = (date // 100) % 100
+        day = date % 100
+        # 유효한 날짜인지 확인
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            # 12개월 주기의 사인 값 계산
+            return np.sin((month / 12) * 2 * np.pi)
+        else:
+            return 0  # 유효하지 않으면 0 반환
+
+    # Pdate 열 추가
+    df['Pdate'] = df['Date'].apply(date_to_sine_or_zero)
+    return df
+
 
 
 def calculate_weight_vectorized(dates):
@@ -505,8 +544,8 @@ def calculate_weight_vectorized(dates):
     return weights
 
 
-file=get_files_list(300,option='sequential',start='20240101')
-data_dir='/home/kfe-shim/extract_its_data'
+file=get_files_list(5,option='sequential',start='20230901')
+data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
 dataset_path_new='./data/seoul'

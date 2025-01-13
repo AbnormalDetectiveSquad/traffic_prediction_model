@@ -33,7 +33,7 @@ class DataLoaderContext:
         """
         if sum(split_ratio) <= 0:
             raise ValueError("Split ratio must have a positive sum.")
-            
+        self.worknum = 0
         self.file_manager = file_manager
         self.batch_size = batch_size
         self.buffer_size = buffer_size
@@ -68,6 +68,7 @@ class DataLoaderContext:
             self.data_queue.get()
             
         # 상태 초기화
+        self.worknum = 0
         self.stop_event.clear()
         self.producer_thread = None
         self.data_queue = queue.Queue(maxsize=self.buffer_size)
@@ -105,7 +106,7 @@ class DataLoaderContext:
             if self.stop_event.is_set():
                 break
                 
-            if current_pos + self.batch_size > end_idx:
+            if (current_pos + self.batch_size > end_idx) and (self.worknum != 0):
                 break
                 
             # FileManager를 통해 배치 데이터 읽기
@@ -113,12 +114,12 @@ class DataLoaderContext:
             self.data_queue.put((x, y))
             
             current_pos += self.batch_size
-            time.sleep(3e-3) 
+            time.sleep(3e-3)
+            self.worknum += 1 
             #pbar.update(self.batch_size)
             #pbar.set_postfix({'queue': f'{self.data_queue.qsize()}/{self.buffer_size}'})
-
         #pbar.close()  
-        self.data_queue.put(None)# 에포크 종료 신호
+        self.data_queue.put(None)#         # 에포크 종료 신호
     def __enter__(self):
         """스레드 시작"""
  
@@ -225,72 +226,46 @@ class DataNormalizer:
        return self.zscore.inverse_transform(data)
 
 class FileManager: 
-    def __init__(self, filepath1,filepath2,args,zscore=None):
-        self.filepath1 = filepath1
-        self.filepath2 = filepath2
-        self.vel = h5py.File(filepath1, "r")
-        self.weight = h5py.File(filepath2, "r")
+    def __init__(self, filepath,args,zscore=None):
+        self.filepath = filepath
+        self.featuresmat = h5py.File(filepath, "r")
         self.final_position = 0
         self.zscore = zscore
-        self.length = len(self.vel[list(self.vel.keys())[0]])
-        self.width = self.vel[list(self.vel.keys())[0]].shape[1]
+        self.length = (self.featuresmat[list(self.featuresmat.keys())[0]]).shape[1]
+        self.width = (self.featuresmat[list(self.featuresmat.keys())[0]]).shape[2]
         self.args = args
         self.device = args.device
     def __del__(self,options='all'):
-        if options == 'all':
-            self.vel.close()
-            self.weight.close()
-        elif options == 'vel':
-            self.vel.close()
-        elif options == 'weight':
-            self.weight.close()
-        else:
-            raise ValueError('Invalid option please choose from [all, vel, weight]')
+  
+        self.featuresmat.close()
+
 
     def check_position(self):
         print(f'current position : {self.final_position}')
 
     def get_key(self):
-        print([list(self.vel.keys())[:],list(self.weight.keys())[:]])
+        print([list(self.featuresmat.keys())[:],list(self.weight.keys())[:]])
     def read_chunk(self, start_pos,end_pos,kind):
         if kind == 'vel':
-            data = self.vel[list(self.vel.keys())[0]][start_pos:end_pos]
+            data = self.featuresmat[list(self.featuresmat.keys())[0]][start_pos:end_pos][0,:,:]
         elif kind == 'weight':
-            data = self.weight[list(self.weight.keys())[0]][start_pos:end_pos]
+            data = self.featuresmat[list(self.featuresmat.keys())[0]][start_pos:end_pos][1,:,:]
         else:
             raise ValueError('Invalid kind please choose from [vel, weight]')
         return data
-    def read_chunk_training_batch_loop(self,start_pos):
-        if self.zscore is None:
-            raise ValueError("please input the zscore") 
-        Result_x = np.zeros([self.args.batch_size, 2, self.args.n_his, self.width])
-        Result_y = np.zeros([self.args.batch_size, self.args.n_pred, self.width])
-        for i in range(0, self.args.batch_size):
-            x = self.vel[list(self.vel.keys())[0]][start_pos:start_pos + self.args.n_his]
-            y=self.weight[list(self.weight.keys())[0]][start_pos:start_pos + self.args.n_his]
-            sol = self.vel[list(self.vel.keys())[0]][start_pos + self.args.n_his:start_pos + self.args.n_his + self.args.n_pred]
-            x = self.zscore.transform(x)
-            sol = self.zscore.transform(sol)
-            X=np.stack([x, y],axis=0)
-            Result_x[i] = X
-            Result_y[i] = sol
-            start_pos+=1
-        return  Result_x, Result_y
     def read_chunk_training_batch(self, start_pos):
         if self.zscore is None:
             raise ValueError("please input the zscore")
-        # 한번에 연속된 범위로 데이터 로드
+            # 한번에 연속된 범위로 데이터 로드
         end_pos = start_pos + self.args.batch_size + self.args.n_his + self.args.n_pred - 1
         try:
-            if not self.vel.id.valid:
-                self.vel = h5py.File(self.filepath1, "r")
-            if not self.weight.id.valid:
-                self.weight = h5py.File(self.filepath2, "r")
-            data_vel = self.vel[list(self.vel.keys())[0]][start_pos:end_pos]
-            data_weight = self.weight[list(self.weight.keys())[0]][start_pos:end_pos]
-            
+            if not self.featuresmat.id.valid:
+                self.featuresmat = h5py.File(self.filepath, "r")
+             # features_matrix에서 데이터 읽기
+            data = self.featuresmat['features_matrix'][:, start_pos:end_pos, :]  # [특성, 시간, 노드]
+
             # 배치별로 데이터 만들기
-            Result_x = np.zeros([self.args.batch_size, 2, self.args.n_his, self.width])
+            Result_x = np.zeros([self.args.batch_size, self.args.features, self.args.n_his, self.width])
             Result_y = np.zeros([self.args.batch_size, self.args.n_pred, self.width])
         except Exception as e:
             print(f"Error at position {start_pos}, attempting to reopen files")
@@ -300,26 +275,36 @@ class FileManager:
                 idx = i
                 
                 # 입력 데이터 준비
-                x_vel = data_vel[idx:idx + self.args.n_his]
-                x_weight = data_weight[idx:idx + self.args.n_his]
-                y_sol = data_vel[idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred]
+                x = data[:,idx:idx + self.args.n_his,:]
+                y = data[0,idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred,:]
                 
                 # 정규화
-                x_vel = self.zscore.transform(x_vel)
-                y_sol = self.zscore.transform(y_sol)
+                x[0,:,:] = self.zscore.transform(x[0,:,:])
+                y = self.zscore.transform(y)
                 
                 # 결과 저장
-                Result_x[i, 0] = x_vel
-                Result_x[i, 1] = x_weight
-                Result_y[i] = y_sol
+                Result_x[i,:,:] = x
+                Result_y[i] = y
         except Exception as e:
             print(f"Error in batch {i}")
-            print(f"y_sol shape: {y_sol.shape if 'y_sol' in locals() else 'not created'}")
+            print(f"y_sol shape: {data.shape if 'data' in locals() else 'not created'}")
             print(f"Result_y shape: {Result_y.shape}")
             raise e
     
         return torch.tensor(Result_x, dtype=torch.float16).to(self.device), torch.tensor(Result_y, dtype=torch.float16).to(self.device)
 
+def delete_if_exists(path):
+    if os.path.exists(path):
+        if os.path.isfile(path):
+            os.remove(path)
+            print(f"File '{path}' has been deleted.")
+        elif os.path.isdir(path):
+            os.rmdir(path)  # Only works for empty directories
+            print(f"Directory '{path}' has been deleted.")
+        else:
+            print(f"'{path}' exists but is neither a file nor an empty directory. Cannot delete.")
+    else:
+        print(f"'{path}' does not exist.")
 
 def load_adj(arg):  
     dataset_name=arg.dataset
@@ -327,10 +312,14 @@ def load_adj(arg):
     nodes_name="filtered_nodes.shp"
     links_name="filtered_links.shp"
     dataset_path = os.path.join(dataset_path, dataset_name)
+
     nodes_gdf = gpd.read_file(os.path.join(dataset_path, nodes_name))
     links_gdf = gpd.read_file(os.path.join(dataset_path, links_name))
+
     save_option, dataset_path_new=check_table_files(dataset_path, nodes_name, links_name)
-    dense_matrix,n_links=create_adjacency_matrix(links_gdf, nodes_gdf,save_option,dataset_path_new,arg.k_threshold)
+    if dataset_path_new:  # Ensure it's not None or empty
+        delete_if_exists(dataset_path_new)
+    dense_matrix,n_links=create_adjacency_matrix(links_gdf, nodes_gdf,True,dataset_path_new,arg.k_threshold)
     adj = sp.csc_matrix(dense_matrix)
     n_vertex = adj.shape[0]
     return adj, n_vertex

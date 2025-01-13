@@ -19,17 +19,18 @@ import wandb
 import threading
 import queue
 import os
-
+wandbonoff = False
 globaln = 0
-# wandb offline 모드 설정
-os.environ['WANDB_MODE'] = 'offline'
+# wandb online 모드 설정
+os.environ['WANDB_MODE'] = 'online'
 log_queue = queue.Queue()
 #import nni
 def wandb_log_safe(data):
+    global wandbonoff
     # 메인 스레드에서만 wandb.log 호출
-    if threading.current_thread() is threading.main_thread():
+    if threading.current_thread() and wandbonoff is threading.main_thread():
         wandb.log(data)
-    else:
+    elif wandbonoff:
         log_queue.put(data)
 def process_log_queue():
     while not log_queue.empty():
@@ -75,11 +76,11 @@ def get_parameters(config=None):
     parser.add_argument('--droprate', type=float, default=0.01)
 
 
-    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.00006, help='learning rate')
     
 
 
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=256)
 
 
 
@@ -87,7 +88,7 @@ def get_parameters(config=None):
     
     
     
-    parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
+    parser.add_argument('--epochs', type=int, default=100, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.95)
@@ -95,27 +96,19 @@ def get_parameters(config=None):
     parser.add_argument('--k_threshold', type=float, default=460.0, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=2, help='number of bottleneck chnnal | in paper value is 16')
   
-
-    parser.add_argument('--fname', type=str, default='K460_16base_S220samp_seq_lr0.0001_0112p', help='name')
+    parser.add_argument('--features', type=int, default='5', help='number of features')
+    parser.add_argument('--fname', type=str, default='K460_16base_S400samp_seq_lr0.00006_0112p', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
 
     if config:
-        
         for key, value in config.items():
             setattr(args, key, value)
-    else:
-        # Initialize WandB for non-sweep runs
-        wandb.login()
-        wandb.init(project="traffic_prediction_off_line_project", config=vars(args),mode="offline")
-        wandb.config.update(vars(args), allow_val_change=True)
-    print('Training configs: {}'.format(args))
 
-       # Sweep 실행 시 wandb.config 값으로 덮어쓰
 
     # For stable experiment results
     set_env(args.seed)
@@ -136,10 +129,10 @@ def get_parameters(config=None):
     # blocks: settings of channel size in st_conv_blocks and output layer,
     # using the bottleneck design in st_conv_blocks
     blocks = []
-    if args.HotEncoding == 'On':
-        blocks.append([2])
-    else:
-        blocks.append([1])
+ 
+    blocks.append([args.features])
+
+
 
     n=args.complexity
     for l in range(args.stblock_num):
@@ -153,7 +146,7 @@ def get_parameters(config=None):
 
     return args, device, blocks
 
-def setup_preprocess(args,file_path1,file_path2,device):
+def setup_preprocess(args,file_path,device):
     adj, n_vertex = fi.load_adj(args)
     gso = utility.calc_gso(adj, args.gso_type)
     gso = utility.calc_chebynet_gso(gso)
@@ -163,7 +156,7 @@ def setup_preprocess(args,file_path1,file_path2,device):
     gso=None
     dataset_path = './data'
     dataset_path = os.path.join(dataset_path, args.dataset)
-    data = fi.FileManager(file_path1,file_path2,args)
+    data = fi.FileManager(file_path,args)
     zscore = fi.DataNormalizer()
     vel = data.read_chunk(0, 5000, 'vel')
     zscore.initialize_from_data(vel)
@@ -303,7 +296,7 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,star
                 f"{val_loss:.6f}",
                 f"{gpu_mem_alloc:.2f}"
             ])
-            print("csv data saved")
+            print("csv data saved") 
         es(val_loss, model, optimizer, scheduler, epoch)
         wandb_log_safe({
             "train_loss": l_sum / n,
@@ -404,10 +397,10 @@ def setup_sweep():
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
             "weight_decay_rate": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
             "k_threshold" : {"min": 200.0, "max": 550.0, "distribution": "uniform"},
-            "complexity": {"values": [4,8,16,32]},
+            "complexity": {"values": [8,16,32,64]},
         },
         }
-    sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_off_line_project")
+    sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_on_line_project")
     return sweep_id
 
 def main(config=None):
@@ -418,9 +411,8 @@ def main(config=None):
         config = wandb.config
         globaln+=1
         args, device, blocks = get_parameters(config)
-        vel_path = f"./data/{args.dataset}/speed_matrix.h5"
-        weight_path = f"./data/{args.dataset}/weight_matrix.h5"
-        data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path,device)
+        mat_path = f"./data/{args.dataset}/speed_features_matrixmatrix.h5"
+        data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,mat_path,device)
         loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
         x,y=data.read_chunk_training_batch(0)
         print(x.shape,y.shape)
@@ -431,10 +423,28 @@ def main(config=None):
         test(zscore, loss, model, test_iter, args,device)
         test_iter.file_manager.__del__()
 
+def main2():
+    args, device, blocks = get_parameters()
+    mat_path = f"./data/{args.dataset}/features_matrix.h5"
+    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,mat_path,device)
+    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
+    x,y=data.read_chunk_training_batch(0)
+    print(x.shape,y.shape)
+    if args.mode == 'train':
+        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
+    val_iter.file_manager.__del__()
+    train_iter.file_manager.__del__()
+    test(zscore, loss, model, test_iter, args,device)
+    test_iter.file_manager.__del__()
+
 if __name__ == "__main__":
+    
     logging.basicConfig(level=logging.INFO)
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
-    sweep_id = setup_sweep()
-    wandb.agent(sweep_id, function=main)
-    wandb.finish()
+    if wandbonoff:
+        sweep_id = setup_sweep()
+        wandb.agent(sweep_id, function=main)
+        wandb.finish()
+    else:
+        main2()
