@@ -1,0 +1,16 @@
+wandb_version: 1
+
+batch_size:
+  value: 16
+complexity:
+  value: 4
+dropout:
+  value: 0.17976337667494216
+gamma:
+  value: 0.8515746935178545
+k_threshold:
+  value: 245.08073330071863
+lr:
+  value: 0.0009364490647047744
+weight_decay_rate:
+  value: 0.07045230859186354

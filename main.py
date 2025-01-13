@@ -20,7 +20,7 @@ import threading
 import queue
 import os
 
-
+globaln = 0
 # wandb offline 모드 설정
 os.environ['WANDB_MODE'] = 'offline'
 log_queue = queue.Queue()
@@ -103,7 +103,9 @@ def get_parameters(config=None):
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
+
     if config:
+        
         for key, value in config.items():
             setattr(args, key, value)
     else:
@@ -113,9 +115,9 @@ def get_parameters(config=None):
         #wandb.init(project="traffic prediction", config=vars(args))
         wandb.config.update(vars(args), allow_val_change=True)
     print('Training configs: {}'.format(args))
-    
+
        # Sweep 실행 시 wandb.config 값으로 덮어쓰
-    config = wandb.config
+
     # For stable experiment results
     set_env(args.seed)
 
@@ -390,7 +392,6 @@ def test(zscore, loss, model, test_iter, args,device):
     
     print(f'Dataset {args.dataset:s} | Test loss {test_MSE:.6f} | MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
     print(f"Test results saved to {output_file}")
-    
     return test_MSE, test_MAE, test_RMSE, test_WMAPE
 
 def setup_sweep():
@@ -410,44 +411,31 @@ def setup_sweep():
     sweep_id = wandb.sweep(sweep_config, project="traffic prediction")
     return sweep_id
 
-
 def main(config=None):
-    if config:
-        args, device, blocks = get_parameters(config)
-    else:
-        args, device, blocks = get_parameters()
-        sweep_id = setup_sweep()
-        wandb.agent(
-            sweep_id,
-            function=lambda: main(wandb.config),
-        )
-        wandb.finish()
-        return 
-    vel_path = f"./data/{args.dataset}/speed_matrix.h5"
-    weight_path = f"./data/{args.dataset}/weight_matrix.h5"
+    global globaln
     
-    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path,device)
-    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
-    x,y=data.read_chunk_training_batch(0)
-    print(x.shape,y.shape)
-    if args.mode == 'train':
-        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
-    val_iter.file_manager.__del__()
-    train_iter.file_manager.__del__()
-    test(zscore, loss, model, test_iter, args,device)
-    test_iter.file_manager.__del__()
+    with wandb.init(config=config):   
+        print(f'{globaln}번째 스윕 실행')
+        config = wandb.config
+        globaln+=1
+        args, device, blocks = get_parameters(config)
+        vel_path = f"./data/{args.dataset}/speed_matrix.h5"
+        weight_path = f"./data/{args.dataset}/weight_matrix.h5"
+        data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path,device)
+        loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
+        x,y=data.read_chunk_training_batch(0)
+        print(x.shape,y.shape)
+        if args.mode == 'train':
+            train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
+        val_iter.file_manager.__del__()
+        train_iter.file_manager.__del__()
+        test(zscore, loss, model, test_iter, args,device)
+        test_iter.file_manager.__del__()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
-    if wandb.run is None:  # 일반 실행
-        main()
-    else:  # Sweep 실행
-        sweep_id = setup_sweep()
-
-        # Sweep 실행: 전체 코드를 main으로 통합
-        wandb.agent(
-            sweep_id,
-            function=lambda: main(wandb.config),
-        )
+    sweep_id = setup_sweep()
+    wandb.agent(sweep_id, function=main)
+    wandb.finish()
