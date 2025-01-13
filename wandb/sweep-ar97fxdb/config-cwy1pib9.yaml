@@ -1,0 +1,16 @@
+wandb_version: 1
+
+L2 penalty:
+  value: 0.0347148622081374
+batch_size:
+  value: 64
+chennal:
+  value: 4
+dropout:
+  value: 0.28765495514211475
+gamma:
+  value: 0.9562100271393036
+k_threshold:
+  value: 478.1194099265394
+learning_rate:
+  value: 1.0006832897846194
