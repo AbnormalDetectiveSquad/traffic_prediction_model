@@ -15,8 +15,26 @@ from script import file_input as fi
 from script import utility, earlystopping, opt
 from model import models
 from torch.amp import autocast, GradScaler
+import wandb
+import threading
+import queue
+import os
 
+
+# wandb offline 모드 설정
+os.environ['WANDB_MODE'] = 'offline'
+log_queue = queue.Queue()
 #import nni
+def wandb_log_safe(data):
+    # 메인 스레드에서만 wandb.log 호출
+    if threading.current_thread() is threading.main_thread():
+        wandb.log(data)
+    else:
+        log_queue.put(data)
+def process_log_queue():
+    while not log_queue.empty():
+        data = log_queue.get()
+        wandb.log(data)
 
 def set_env(seed):
     # Set available CUDA devices
@@ -33,7 +51,7 @@ def set_env(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     # torch.use_deterministic_algorithms(True)  
-def get_parameters():
+def get_parameters(config=None):
     parser = argparse.ArgumentParser(description='STGCN')
     parser.add_argument('--enable_cuda', type=bool, default=True, help='enable CUDA, default as True')
     parser.add_argument('--seed', type=int, default=42, help='set the random seed for stabilizing experiment results')
@@ -77,16 +95,26 @@ def get_parameters():
     parser.add_argument('--k_threshold', type=float, default=460.0, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
   
 
     parser.add_argument('--fname', type=str, default='K460_16base_S220samp_seq_lr0.0001_0112p', help='name')
-    parser.add_argument('--mode', type=str, default='test', help='test or train')
+    parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
+    if config:
+        for key, value in config.items():
+            setattr(args, key, value)
+    else:
+        # Initialize WandB for non-sweep runs
+        wandb.init(project="traffic prediction", config=vars(args),mode="offline")
+        #wandb.init(project="traffic prediction", config=vars(args))
+        wandb.config.update(vars(args), allow_val_change=True)
     print('Training configs: {}'.format(args))
-
+    
+       # Sweep 실행 시 wandb.config 값으로 덮어쓰
+    config = wandb.config
     # For stable experiment results
     set_env(args.seed)
 
@@ -119,10 +147,11 @@ def get_parameters():
     elif Ko > 0:
         blocks.append([int(n*8), int(n*8)])
     blocks.append([1])
-    
+    # WandB 설정
+
     return args, device, blocks
 
-def setup_preprocess(args,file_path1,file_path2):
+def setup_preprocess(args,file_path1,file_path2,device):
     adj, n_vertex = fi.load_adj(args)
     gso = utility.calc_gso(adj, args.gso_type)
     gso = utility.calc_chebynet_gso(gso)
@@ -169,7 +198,7 @@ def setup_preprocess(args,file_path1,file_path2):
     return data, args, n_vertex, zscore,train_iter,val_iter,test_iter
 
 
-def setup_model(args, blocks, n_vertex):
+def setup_model(args, blocks, n_vertex,device):
     loss = nn.MSELoss()
     es = earlystopping.EarlyStopping(delta=0.0, 
                                      patience=args.patience, 
@@ -207,7 +236,7 @@ def setup_model(args, blocks, n_vertex):
     return loss, es, model, optimizer, scheduler ,start_epoch, best_val_loss
 
 @torch.no_grad()
-def val(model, val_iter):
+def val(model, val_iter,loss):
     model.eval()
     l_sum, n = 0.0, 0
     #qq=0
@@ -257,7 +286,7 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,star
                 #del x, y_pred,y,l
                 #torch.cuda.empty_cache() 
         scheduler.step()
-        val_loss = val(model, val_iter)
+        val_loss = val(model, val_iter,loss)
         # GPU memory usage
         gpu_mem_alloc = torch.cuda.max_memory_allocated() / 1000000 if torch.cuda.is_available() else 0
         print('Epoch: {:03d} | Lr: {:.20f} |Train loss: {:.6f} | Val loss: {:.6f} | GPU occupy: {:.6f} MiB'.\
@@ -274,13 +303,24 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,star
             ])
             print("csv data saved")
         es(val_loss, model, optimizer, scheduler, epoch)
+        wandb_log_safe({
+            "train_loss": l_sum / n,
+            "val_loss": val_loss,
+            "epoch": epoch,
+            "GPU occupy" : gpu_mem_alloc
+            })
+       
         if es.early_stop:
             print("Early stopping")
             break
         train_iter.reboot()
         val_iter.reboot()
+    while not log_queue.empty():
+        data = log_queue.get()
+        wandb.log(data)
+
 @torch.no_grad()
-def test(zscore, loss, model, test_iter, args):
+def test(zscore, loss, model, test_iter, args,device):
     # Load the model weights
     #model.load_state_dict(torch.load("./Weight/STGCN_" + args.dataset + args.fname + ".pt"))
     
@@ -351,24 +391,62 @@ def test(zscore, loss, model, test_iter, args):
     print(f"Test results saved to {output_file}")
     
     return test_MSE, test_MAE, test_RMSE, test_WMAPE
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    warnings.filterwarnings("ignore", category=UserWarning)
-    
-    args, device, blocks = get_parameters()
-    
+
+def setup_sweep():
+    sweep_config = {
+        "method": "random",
+        "metric": {"name": "val_loss", "goal": "minimize"},
+        "parameters": {
+            "learning_rate": {"min": 0.000001, "max": 0.001, "distribution": "log_uniform"},
+            "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
+            "batch_size": {"values": [8,16, 32, 64]},
+            "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
+            "L2 penalty": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
+            "k_threshold" : {"min": 200.0, "max": 550.0, "distribution": "uniform"},
+            "chennal": {"values": [4,8,16,32]},
+        },
+        }
+    sweep_id = wandb.sweep(sweep_config, project="traffic prediction")
+    return sweep_id
+
+
+def main(config=None):
+    if config:
+        args, device, blocks = get_parameters(config)
+    else:
+        args, device, blocks = get_parameters()
+        sweep_id = setup_sweep()
+        wandb.agent(
+            sweep_id,
+            function=lambda: main(wandb.config),
+        )
+        wandb.finish()
+        return 
     vel_path = f"./data/{args.dataset}/speed_matrix.h5"
     weight_path = f"./data/{args.dataset}/weight_matrix.h5"
     
-    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path)
-    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex)
+    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,vel_path,weight_path,device)
+    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
     x,y=data.read_chunk_training_batch(0)
     print(x.shape,y.shape)
     if args.mode == 'train':
         train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
     val_iter.file_manager.__del__()
     train_iter.file_manager.__del__()
-    test(zscore, loss, model, test_iter, args)
+    test(zscore, loss, model, test_iter, args,device)
     test_iter.file_manager.__del__()
 
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    if wandb.run is None:  # 일반 실행
+        main()
+    else:  # Sweep 실행
+        sweep_id = setup_sweep()
+
+        # Sweep 실행: 전체 코드를 main으로 통합
+        wandb.agent(
+            sweep_id,
+            function=lambda: main(wandb.config),
+        )
