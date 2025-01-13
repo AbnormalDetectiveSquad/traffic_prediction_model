@@ -19,7 +19,7 @@ import wandb
 import threading
 import queue
 import os
-wandbonoff = False
+wandbonoff = True
 globaln = 0
 # wandb online 모드 설정
 os.environ['WANDB_MODE'] = 'online'
@@ -27,16 +27,10 @@ log_queue = queue.Queue()
 #import nni
 def wandb_log_safe(data):
     global wandbonoff
-    # 메인 스레드에서만 wandb.log 호출
-    if threading.current_thread() and wandbonoff is threading.main_thread():
+    if wandbonoff:
         wandb.log(data)
-    elif wandbonoff:
-        log_queue.put(data)
-def process_log_queue():
-    while not log_queue.empty():
-        data = log_queue.get()
-        wandb.log(data)
-
+    else:
+        return None
 def set_env(seed):
     # Set available CUDA devices
     # os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
@@ -392,7 +386,7 @@ def setup_sweep():
         "method": "random",
         "metric": {"name": "val_loss", "goal": "minimize"},
         "parameters": {
-            "lr": {"min": 0.000001, "max": 0.001, "distribution": "log_uniform_values"},
+            "lr": {"min": 0.000001, "max": 0.005, "distribution": "log_uniform_values"},
             "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
             "batch_size": {"values": [8,16, 32, 64]},
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
@@ -412,7 +406,7 @@ def main(config=None):#wandb sweep
         config = wandb.config
         globaln+=1
         args, device, blocks = get_parameters(config)
-        mat_path = f"./data/{args.dataset}/speed_features_matrixmatrix.h5"
+        mat_path = f"./data/{args.dataset}/features_matrix.h5"
         data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,mat_path,device)
         loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
         x,y=data.read_chunk_training_batch(0)
