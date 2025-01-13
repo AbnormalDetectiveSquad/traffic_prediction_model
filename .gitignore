@@ -13,6 +13,12 @@ __pycache__/
 *.shx
 *.shx
 *.wandb
+*.log                        # 디버그 로그 파일
+*.json                       # 실행 요약 파일
+*.yaml                       # 설정 파일
+*/files/   
 train_log_seoul30_step_8_base_0.0015t.csv
+wandb/
+!wandb/config-defaults.yaml  # 특정 설정 파일을 제외하고 무시
 STGCN_seoul.pt
 STGCN_seoul.pt

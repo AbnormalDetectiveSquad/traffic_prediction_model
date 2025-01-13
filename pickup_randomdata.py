@@ -505,7 +505,7 @@ def calculate_weight_vectorized(dates):
     return weights
 
 
-file=get_files_list(60,option='sequential',start='20240101')
+file=get_files_list(300,option='sequential',start='20240101')
 data_dir='/home/kfe-shim/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
