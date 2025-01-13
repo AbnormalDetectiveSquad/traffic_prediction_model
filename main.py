@@ -53,6 +53,7 @@ def set_env(seed):
     torch.backends.cudnn.deterministic = True
     # torch.use_deterministic_algorithms(True)  
 def get_parameters(config=None):
+    global globaln
     parser = argparse.ArgumentParser(description='STGCN')
     parser.add_argument('--enable_cuda', type=bool, default=True, help='enable CUDA, default as True')
     parser.add_argument('--seed', type=int, default=42, help='set the random seed for stabilizing experiment results')
@@ -99,7 +100,7 @@ def get_parameters(config=None):
     parser.add_argument('--complexity', type=int, default=2, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
-    parser.add_argument('--fname', type=str, default='K460_16base_S400samp_seq_lr0.00006_0112p', help='name')
+    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
@@ -453,7 +454,6 @@ def main3():#wandb on
     train_iter.file_manager.__del__()
     test(zscore, loss, model, test_iter, args,device)
     test_iter.file_manager.__del__()
-
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

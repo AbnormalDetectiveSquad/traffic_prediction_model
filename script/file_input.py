@@ -114,7 +114,7 @@ class DataLoaderContext:
             self.data_queue.put((x, y))
             
             current_pos += self.batch_size
-            time.sleep(3e-3)
+            #time.sleep(1e-3)
             self.worknum += 1 
             #pbar.update(self.batch_size)
             #pbar.set_postfix({'queue': f'{self.data_queue.qsize()}/{self.buffer_size}'})
