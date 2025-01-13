@@ -403,7 +403,7 @@ def setup_sweep():
     sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_on_line_project")
     return sweep_id
 
-def main(config=None):
+def main(config=None):#wandb sweep
     global globaln
     
     with wandb.init(config=config):   
@@ -423,7 +423,7 @@ def main(config=None):
         test(zscore, loss, model, test_iter, args,device)
         test_iter.file_manager.__del__()
 
-def main2():
+def main2():#wandb off
     args, device, blocks = get_parameters()
     mat_path = f"./data/{args.dataset}/features_matrix.h5"
     data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,mat_path,device)
@@ -436,9 +436,26 @@ def main2():
     train_iter.file_manager.__del__()
     test(zscore, loss, model, test_iter, args,device)
     test_iter.file_manager.__del__()
+def main3():#wandb on
+    global wandbonoff
+    args, device, blocks = get_parameters()
+    wandb.init(project="traffic prediction 400days 4 lane toy set",name="6_features",config=vars(args))
+    mat_path = f"./data/{args.dataset}/features_matrix.h5"
+    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,mat_path,device)
+    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
+    x,y=data.read_chunk_training_batch(0)
+    print(x.shape,y.shape)
+    if args.mode == 'train':
+        wandbonoff = True
+        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
+        wandbonoff = False
+    val_iter.file_manager.__del__()
+    train_iter.file_manager.__del__()
+    test(zscore, loss, model, test_iter, args,device)
+    test_iter.file_manager.__del__()
+
 
 if __name__ == "__main__":
-    
     logging.basicConfig(level=logging.INFO)
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
