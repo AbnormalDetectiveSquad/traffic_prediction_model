@@ -108,6 +108,7 @@ def get_parameters(config=None):
             setattr(args, key, value)
     else:
         # Initialize WandB for non-sweep runs
+        wandb.login()
         wandb.init(project="traffic prediction", config=vars(args),mode="offline")
         #wandb.init(project="traffic prediction", config=vars(args))
         wandb.config.update(vars(args), allow_val_change=True)
@@ -397,7 +398,7 @@ def setup_sweep():
         "method": "random",
         "metric": {"name": "val_loss", "goal": "minimize"},
         "parameters": {
-            "lr": {"min": 0.000001, "max": 0.001, "distribution": "log_uniform"},
+            "lr": {"min": 0.000001, "max": 0.001, "distribution": "log_uniform_values"},
             "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
             "batch_size": {"values": [8,16, 32, 64]},
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
