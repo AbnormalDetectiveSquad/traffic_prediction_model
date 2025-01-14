@@ -75,7 +75,7 @@ def get_parameters(config=None):
     
 
 
-    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--batch_size', type=int, default=64)
 
 
 
@@ -91,10 +91,10 @@ def get_parameters(config=None):
     parser.add_argument('--k_threshold', type=float, default=460.0, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=2, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=32, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
-    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th', help='name')
+    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th_64batchfix', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
@@ -388,11 +388,10 @@ def setup_sweep():
         "parameters": {
             "lr": {"min": 0.000001, "max": 0.005, "distribution": "log_uniform_values"},
             "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
-            "batch_size": {"values": [8,16, 32, 64]},
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
             "weight_decay_rate": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
             "k_threshold" : {"min": 200.0, "max": 550.0, "distribution": "uniform"},
-            "complexity": {"values": [8,16,32,64]},
+            "complexity": {"values": [8,16,32]},
         },
         }
     sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_on_line_project")
