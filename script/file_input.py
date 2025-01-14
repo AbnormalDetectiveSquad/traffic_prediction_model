@@ -327,7 +327,7 @@ def load_adj(arg):
 def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_threshold):
     # Step 1: 길(LINK_ID)을 노드로 간주하고 중심점 계산
     links_gdf['centroid'] = links_gdf.geometry.centroid
-    link_ids = links_gdf['LINK_ID'].unique()
+    link_ids = sorted(links_gdf['LINK_ID'].unique())
     link_index_map = {link_id: idx for idx, link_id in enumerate(link_ids)}
     n_links = len(link_ids)
     # Step 2: 인접 행렬 초기화

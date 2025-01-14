@@ -19,7 +19,7 @@ import wandb
 import threading
 import queue
 import os
-wandbonoff = True
+wandbonoff = False
 globaln = 0
 # wandb online 모드 설정
 os.environ['WANDB_MODE'] = 'online'
