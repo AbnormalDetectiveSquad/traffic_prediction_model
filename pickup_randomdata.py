@@ -518,7 +518,6 @@ def add_pdate_column(df):
             return np.sin((month / 12) * 2 * np.pi)
         else:
             return 0  # 유효하지 않으면 0 반환
-
     # Pdate 열 추가
     df['Pdate'] = df['Date'].apply(date_to_sine_or_zero)
     return df

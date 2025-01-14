@@ -22,3 +22,4 @@ wandb/
 !wandb/config-defaults.yaml  # 특정 설정 파일을 제외하고 무시
 STGCN_seoul.pt
 STGCN_seoul.pt
+*/wandb

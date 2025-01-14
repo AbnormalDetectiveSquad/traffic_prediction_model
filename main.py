@@ -19,7 +19,7 @@ import wandb
 import threading
 import queue
 import os
-wandbonoff = False
+wandbonoff = True
 globaln = 0
 # wandb online 모드 설정
 os.environ['WANDB_MODE'] = 'online'
@@ -83,7 +83,7 @@ def get_parameters(config=None):
     
     
     
-    parser.add_argument('--epochs', type=int, default=100, help='epochs, default as 1000')
+    parser.add_argument('--epochs', type=int, default=50, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.95)
@@ -94,7 +94,7 @@ def get_parameters(config=None):
     parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
-    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th', help='name')
+    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan_4090_{globaln}th', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
