@@ -75,7 +75,7 @@ def get_parameters(config=None):
     
 
 
-    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--batch_size', type=int, default=16)
 
 
 
@@ -91,7 +91,7 @@ def get_parameters(config=None):
     parser.add_argument('--k_threshold', type=float, default=460.0, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=2, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
     parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th', help='name')
@@ -107,7 +107,7 @@ def get_parameters(config=None):
 
     # For stable experiment results
     set_env(args.seed)
-
+    args.batch_size = int(2048/args.complexity)
     # Running in Nvidia GPU (CUDA) or CPU
     if args.enable_cuda and torch.cuda.is_available():
         # Set available CUDA devices
@@ -388,14 +388,14 @@ def setup_sweep():
         "parameters": {
             "lr": {"min": 0.000001, "max": 0.005, "distribution": "log_uniform_values"},
             "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
-            "batch_size": {"values": [8,16, 32, 64]},
+            #"batch_size": {"values": [8,16, 32, 64]},
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
             "weight_decay_rate": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
             "k_threshold" : {"min": 200.0, "max": 550.0, "distribution": "uniform"},
-            "complexity": {"values": [8,16,32,64]},
+            "complexity": {"values": [2,4,8]},
         },
         }
-    sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_on_line_project")
+    sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_4090_project")
     return sweep_id
 
 def main(config=None):#wandb sweep

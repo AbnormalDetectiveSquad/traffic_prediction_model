@@ -1,3 +1,15 @@
 Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
 1,6e-05,1.032279,1.051933,3049.52
 2,6e-05,1.001774,1.025037,3049.52
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,6e-05,1.055293,1.096498,6681.77
+2,6e-05,1.030731,1.071633,6681.77
+New Epoch,LR,TrainLoss,ValLoss,GPUMem(MB)
+1,6e-05,0.997447,1.012715,8989.34
+2,6e-05,0.989090,0.989934,8989.34
+3,6e-05,0.955347,0.942159,8989.34
+4,6e-05,0.910974,0.906350,8989.34
