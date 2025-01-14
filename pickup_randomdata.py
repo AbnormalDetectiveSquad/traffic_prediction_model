@@ -503,7 +503,7 @@ def add_ptime_column(df):
     def hhmm_to_minutes(hhmm):
         hours = hhmm // 100  # HH 부분
         minutes = hhmm % 100  # MM 부분
-        time_minutes=hours * 60 + minutes
+        time_minutes=hours * 60 + minutes 
         return  np.sin((time_minutes / 1440) * 2 * np.pi)
     df['Ptime'] = df['Time'].apply(hhmm_to_minutes)
     return df
