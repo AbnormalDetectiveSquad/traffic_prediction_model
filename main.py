@@ -19,10 +19,10 @@ import wandb
 import threading
 import queue
 import os
-wandbonoff = True
+wandbonoff = False
 globaln = 0
 # wandb online 모드 설정
-os.environ['WANDB_MODE'] = 'online'
+os.environ['WANDB_MODE'] = 'offline'
 log_queue = queue.Queue()
 #import nni
 def wandb_log_safe(data):
@@ -68,30 +68,30 @@ def get_parameters(config=None):
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
     
     
-    parser.add_argument('--droprate', type=float, default=0.01)
+    parser.add_argument('--droprate', type=float, default=0.30759391962892657)
 
 
-    parser.add_argument('--lr', type=float, default=0.00006, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.0014330353544543038, help='learning rate')
     
 
 
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=8)
 
 
 
-    parser.add_argument('--weight_decay_rate', type=float, default=0.00000, help='weight decay (L2 penalty)')
+    parser.add_argument('--weight_decay_rate', type=float, default=0.023589744137200955, help='weight decay (L2 penalty)')
     
     
     
     parser.add_argument('--epochs', type=int, default=50, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
-    parser.add_argument('--gamma', type=float, default=0.95)
+    parser.add_argument('--gamma', type=float, default=0.871287183007703)
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
-    parser.add_argument('--k_threshold', type=float, default=460.0, help='adjacency_matrix threshold parameter menual setting')
+    parser.add_argument('--k_threshold', type=float, default=448.241, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=4, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=32, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
     parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan_4090_{globaln}th', help='name')

@@ -35,7 +35,7 @@ def validate_and_create_pivot_table(combined_data):
     pivot_data = pivot_data.sort_index()
     
     return pivot_data
-def get_files_list(number,option='non-holidays',start=None, data_dir='/home/ssy/extract_its_data'):
+def get_files_list(number,option='non-holidays',start=None, data_dir='/home/kfe-shim/extract_its_data'):
     # 파일 리스트 가져오기
     all_files = [f for f in os.listdir(data_dir) if f.endswith('_5Min.csv')]
     if option == 'all':
