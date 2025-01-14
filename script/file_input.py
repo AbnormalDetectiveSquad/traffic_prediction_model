@@ -18,8 +18,9 @@ class DataLoaderContext:
         batch_size=16,
         buffer_size=300,
         shuffle=False,
-        split_ratio=[0.7, 0.15, 0.15],
+        split_ratio=[0.7175, 0.1825, 0.1],#835 강남 침수  (5월5일 폭우 학습 데이터 : 7월 강남 침수 검증데이터 : 테스트데이터는 평범한 가을)
         mode="train",     # 초기 모드 지정
+        Mi_ratio = [0.7,0.3],
     ):
         """
         HDF5 파일에서 데이터를 로드하는 컨텍스트 관리자
@@ -41,6 +42,7 @@ class DataLoaderContext:
         
         # 데이터 분할 계산
         self.split_ratio = [r / sum(split_ratio) for r in split_ratio]
+        self.Mi_ratio = [r / sum(Mi_ratio) for r in Mi_ratio]
         train_ratio, val_ratio, test_ratio = self.split_ratio
         
         total_size = self.file_manager.length
@@ -74,7 +76,8 @@ class DataLoaderContext:
         self.data_queue = queue.Queue(maxsize=self.buffer_size)
     def _calculate_ranges(self, total_size):
         train_ratio, val_ratio, test_ratio = self.split_ratio
-        
+        Miratio,_ = self.Mi_ratio
+        Mi=int(total_size*Miratio)
         # 각 시퀀스에 필요한 최소 길이
         sequence_length = self.batch_size + self.n_his + self.n_pred - 1
         
@@ -88,13 +91,16 @@ class DataLoaderContext:
         self.ranges = {
             "train": (0, train_end),
             "validation": (train_end, val_end),
-            "test": (val_end, usable_size)
+            "test": (val_end, usable_size),
+            "full": (0, usable_size),
+            "Binary_A":(0,Mi),
+            "Binary_B":(Mi,usable_size),
         }
 
     def set_mode(self, mode):
         """훈련, 검증, 테스트 모드 설정"""
         if mode not in self.ranges:
-            raise ValueError("Invalid mode. Choose from ['train', 'validation', 'test']")
+            raise ValueError("Invalid mode. Choose from ['train', 'validation', 'test','full','Binary_A','Binary_B']")
         self.current_range = self.ranges[mode]
 
     def _producer(self):
@@ -327,7 +333,7 @@ def load_adj(arg):
 def create_adjacency_matrix(links_gdf, nodes_gdf, save_option, dataset_path, k_threshold):
     # Step 1: 길(LINK_ID)을 노드로 간주하고 중심점 계산
     links_gdf['centroid'] = links_gdf.geometry.centroid
-    link_ids = links_gdf['LINK_ID'].unique()
+    link_ids = sorted(links_gdf['LINK_ID'].unique())
     link_index_map = {link_id: idx for idx, link_id in enumerate(link_ids)}
     n_links = len(link_ids)
     # Step 2: 인접 행렬 초기화

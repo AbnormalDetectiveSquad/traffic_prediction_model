@@ -35,7 +35,7 @@ def validate_and_create_pivot_table(combined_data):
     pivot_data = pivot_data.sort_index()
     
     return pivot_data
-def get_files_list(number,option='non-holidays',start=None, data_dir='/home/ssy/extract_its_data'):
+def get_files_list(number,option='non-holidays',start=None, data_dir='/home/kfe-shim/extract_its_data'):
     # 파일 리스트 가져오기
     all_files = [f for f in os.listdir(data_dir) if f.endswith('_5Min.csv')]
     if option == 'all':
@@ -503,7 +503,7 @@ def add_ptime_column(df):
     def hhmm_to_minutes(hhmm):
         hours = hhmm // 100  # HH 부분
         minutes = hhmm % 100  # MM 부분
-        time_minutes=hours * 60 + minutes
+        time_minutes=hours * 60 + minutes 
         return  np.sin((time_minutes / 1440) * 2 * np.pi)
     df['Ptime'] = df['Time'].apply(hhmm_to_minutes)
     return df
@@ -518,7 +518,6 @@ def add_pdate_column(df):
             return np.sin((month / 12) * 2 * np.pi)
         else:
             return 0  # 유효하지 않으면 0 반환
-
     # Pdate 열 추가
     df['Pdate'] = df['Date'].apply(date_to_sine_or_zero)
     return df
