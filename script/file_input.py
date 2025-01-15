@@ -182,10 +182,32 @@ class BatchFetcher:
             raise NotImplementedError("Total iterations not set")
         return self.total_iterations
     
+
+class Normalizeiterater():
+    def __init__(self, stream_data,chunck_size=5000):
+        self.stream_data = stream_data
+        self.start=0
+        self.chunk_size=chunck_size
+        self.length = self.stream_data.length if stream_data else 0
+    def __iter__(self):
+        return self
+    def __next__(self):  # iterator는 __next__ 메서드가 필요합니다
+        if self.start >= self.length:
+            self.start = 0
+            raise StopIteration
+        data = self.stream_data.read_chunk(self.start, self.start + self.chunk_size, 'vel')
+        self.start += self.chunk_size
+        return data
+    def update_Normalizeiterater(self, stream_data, chunk_size=5000):
+        self.stream_data = stream_data
+        self.chunk_size = chunk_size
+        self.length = stream_data.length if stream_data else 0
+        self.start = 0
+    
 class DataNormalizer:
    def __init__(self):
        self.zscore = None
-   
+       self.data = Normalizeiterater(None)
    def initialize(self, path):
        """저장된 zscore 파라미터를 로드"""
        try:
@@ -199,10 +221,15 @@ class DataNormalizer:
        except:
            raise FileNotFoundError(f"Could not load normalizer from {path}")
    
-   def initialize_from_data(self, data):
+   def initialize_from_data(self):
+       if self.data.stream_data is None:
+           print("please input the stream_data")
+           return None
        """데이터로부터 zscore 계산 및 정규화된 데이터 반환"""
        self.zscore = preprocessing.StandardScaler()
-       normalized_data = self.zscore.fit_transform(data)
+       for d in self.data:
+            normalized_data = self.zscore.partial_fit(d)
+       
        print("Z-score parameters computed from data")
        print(f"Mean: {self.zscore.mean_}")
        print(f"Scale: {self.zscore.scale_}")
@@ -253,9 +280,9 @@ class FileManager:
         print([list(self.featuresmat.keys())[:],list(self.weight.keys())[:]])
     def read_chunk(self, start_pos,end_pos,kind):
         if kind == 'vel':
-            data = self.featuresmat[list(self.featuresmat.keys())[0]][start_pos:end_pos][0,:,:]
+            data = self.featuresmat[list(self.featuresmat.keys())[0]][0,start_pos:end_pos,:].reshape(-1, self.featuresmat[list(self.featuresmat.keys())[0]][0,start_pos:end_pos,:].shape[-1])
         elif kind == 'weight':
-            data = self.featuresmat[list(self.featuresmat.keys())[0]][start_pos:end_pos][1,:,:]
+            data = self.featuresmat[list(self.featuresmat.keys())[0]][1,start_pos:end_pos,:].reshape(-1, self.featuresmat[list(self.featuresmat.keys())[0]][1,start_pos:end_pos,:].shape[-1])
         else:
             raise ValueError('Invalid kind please choose from [vel, weight]')
         return data
@@ -281,8 +308,8 @@ class FileManager:
                 idx = i
                 
                 # 입력 데이터 준비
-                x = data[:,idx:idx + self.args.n_his,:]
-                y = data[0,idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred,:]
+                x = data[:,idx:idx + self.args.n_his,:].copy()
+                y = data[0,idx + self.args.n_his:idx + self.args.n_his + self.args.n_pred,:].copy()
                 
                 # 정규화
                 x[0,:,:] = self.zscore.transform(x[0,:,:])
@@ -291,6 +318,7 @@ class FileManager:
                 # 결과 저장
                 Result_x[i,:,:] = x
                 Result_y[i] = y
+                
         except Exception as e:
             print(f"Error in batch {i}")
             print(f"y_sol shape: {data.shape if 'data' in locals() else 'not created'}")
@@ -406,3 +434,6 @@ def check_table_files(dataset_path, nodes_name, links_name):
     print(f"Combined table file exists: {file_exists}")
     print(f"Save option set to: {save_option}")
     return save_option, combined_table_file
+
+
+

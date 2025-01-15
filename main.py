@@ -91,7 +91,7 @@ def get_parameters(config=None):
     parser.add_argument('--k_threshold', type=float, default=448.241, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=32, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
     parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th_64batchfix', help='name')
@@ -107,7 +107,7 @@ def get_parameters(config=None):
 
     # For stable experiment results
     set_env(args.seed)
-    args.batch_size = int(2048/args.complexity)
+    #args.batch_size = int(2048/args.complexity)
     # Running in Nvidia GPU (CUDA) or CPU
     if args.enable_cuda and torch.cuda.is_available():
         # Set available CUDA devices
@@ -153,8 +153,8 @@ def setup_preprocess(args,file_path,device):
     dataset_path = os.path.join(dataset_path, args.dataset)
     data = fi.FileManager(file_path,args)
     zscore = fi.DataNormalizer()
-    vel = data.read_chunk(0, 5000, 'vel')
-    zscore.initialize_from_data(vel)
+    zscore.data.update_Normalizeiterater(data,10000)
+    zscore.initialize_from_data()
     data.zscore = zscore
     x, sol = data.read_chunk_training_batch(0)
     train_iter=fi.DataLoaderContext(
