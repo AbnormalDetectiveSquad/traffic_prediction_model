@@ -558,7 +558,7 @@ def calculate_weight_vectorized(dates):
     return weights
 
 
-file=get_files_list(10,option='sequential',start='20230901')
+file=get_files_list(400,option='sequential',start='20230901')
 data_dir='/home/ssy/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)

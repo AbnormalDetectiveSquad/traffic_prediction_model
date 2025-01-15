@@ -19,7 +19,7 @@ import wandb
 import threading
 import queue
 import os
-wandbonoff = False
+wandbonoff = True
 globaln = 0
 # wandb online 모드 설정
 os.environ['WANDB_MODE'] = 'offline'
@@ -75,7 +75,7 @@ def get_parameters(config=None):
     
 
 
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=512)
 
 
 
@@ -83,7 +83,7 @@ def get_parameters(config=None):
     
     
     
-    parser.add_argument('--epochs', type=int, default=50, help='epochs, default as 1000')
+    parser.add_argument('--epochs', type=int, default=10, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.871287183007703)
@@ -91,7 +91,7 @@ def get_parameters(config=None):
     parser.add_argument('--k_threshold', type=float, default=448.241, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=2, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
     parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th_64batchfix', help='name')
@@ -103,6 +103,7 @@ def get_parameters(config=None):
     if config:
         for key, value in config.items():
             setattr(args, key, value)
+        config = vars(args)
 
 
     # For stable experiment results
@@ -386,13 +387,13 @@ def setup_sweep():
         "method": "random",
         "metric": {"name": "val_loss", "goal": "minimize"},
         "parameters": {
-            "lr": {"min": 0.000001, "max": 0.005, "distribution": "log_uniform_values"},
-            "dropout": {"min": 0, "max": 0.4, "distribution": "uniform"},
+            "lr": {"min": 0.0001, "max": 0.05, "distribution": "log_uniform_values"},
+            "droprate": {"min": 0, "max": 0.4, "distribution": "uniform"},
             #"batch_size": {"values": [8,16, 32, 64]},
             "gamma": {"min": 0.85, "max": 1.0, "distribution": "uniform"},
             "weight_decay_rate": {"min": 0.0, "max": 0.1, "distribution": "uniform"},
-            "k_threshold" : {"min": 200.0, "max": 550.0, "distribution": "uniform"},
-            "complexity": {"values": [2,4,8]},
+            "k_threshold" : {"min": 400.0, "max": 550.0, "distribution": "uniform"},
+            #"complexity": {"values": [2,4,8]},
         },
         }
     sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_4090_project")
