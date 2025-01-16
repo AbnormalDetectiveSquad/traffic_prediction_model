@@ -68,33 +68,33 @@ def get_parameters(config=None):
     parser.add_argument('--enable_bias', type=bool, default=True, help='default as True')
     
     
-    parser.add_argument('--droprate', type=float, default=0.30759391962892657)
+    parser.add_argument('--droprate', type=float, default=0.11934253064493432)
 
 
-    parser.add_argument('--lr', type=float, default=0.0014330353544543038, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.005500530762294727, help='learning rate')
     
 
 
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=16)
 
 
 
-    parser.add_argument('--weight_decay_rate', type=float, default=0.023589744137200955, help='weight decay (L2 penalty)')
+    parser.add_argument('--weight_decay_rate', type=float, default=0.015042254587113923, help='weight decay (L2 penalty)')
     
     
     
-    parser.add_argument('--epochs', type=int, default=50, help='epochs, default as 1000')
+    parser.add_argument('--epochs', type=int, default=1000, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
-    parser.add_argument('--gamma', type=float, default=0.871287183007703)
+    parser.add_argument('--gamma', type=float, default=0.8734346556732533)
     parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
-    parser.add_argument('--k_threshold', type=float, default=448.241, help='adjacency_matrix threshold parameter menual setting')
+    parser.add_argument('--k_threshold', type=float, default=430.6227347591174, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=16, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=36, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
-    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th_64batchfix', help='name')
+    parser.add_argument('--fname', type=str, default=f'prerun', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
