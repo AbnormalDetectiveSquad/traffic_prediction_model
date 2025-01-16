@@ -3,9 +3,8 @@ import h5py
 import os
 import numpy as np
 from datetime import datetime
-from scipy.interpolate import RegularGridInterpolator
+#from scipy.interpolate import RegularGridInterpolator
 import time
-import pandas as pd
 import numpy as np
 from pyproj import Transformer
 import math
@@ -14,7 +13,12 @@ import multiprocessing as mp
 from datetime import datetime, timedelta
 import os
 import warnings
+import hashlib
+
+
 warnings.filterwarnings('ignore')
+
+
 
 class WeatherMapper:
     def __init__(self, weather_processor, chunk_size=10000):
@@ -32,22 +36,87 @@ class WeatherMapper:
         self.chunk_size = chunk_size
         self.transformer = Transformer.from_crs("EPSG:5179", "EPSG:4326", always_xy=True)
         self.link_grid_coords = {}
+        self.weather_grid_points = None
+        self.cache_dir = "./Weather/grid_cache"
+        self.mapping_file = None
+        self.link_ids = None
+        self.grid_coords = None
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.initialize_weather_grid()
+        
+    def initialize_weather_grid(self):
+        """기상청 격자점 초기화"""
+        nx_range = range(57, 64)  # 57에서 63까지
+        ny_range = range(125, 128)  # 125에서 127까지
+        grid_points = []
+        for nx in nx_range:
+            for ny in ny_range:
+                grid_points.append((nx, ny))
+                
+        self.weather_grid_points = np.array(grid_points)
     
-    def check_weather_distribution(self, data):
-        """날씨 데이터의 분포를 확인하는 함수"""
-        print("\n=== 날씨 데이터 분포 ===")
-        print("\nPTY 값 분포:")
-        print(data['PTY'].value_counts())
+    def generate_cache_filename(self, links_gdf):
+        """링크 데이터를 기반으로 캐시 파일 이름 생성"""
+        # 링크 데이터의 특성을 기반으로 해시 생성
+        link_ids = sorted(links_gdf['LINK_ID'].unique())
+        hash_input = '_'.join(map(str, link_ids))
+        hash_value = hashlib.md5(hash_input.encode()).hexdigest()[:10]
+        return f"grid_mapping_{hash_value}.h5"
+    
+    def save_grid_mapping(self, links_gdf):
+        """격자 매핑을 H5 파일로 저장"""
+        filename = self.generate_cache_filename(links_gdf)
+        filepath = os.path.join(self.cache_dir, filename)
         
-        print("\nRN1 기초 통계:")
-        print(data['RN1'].describe())
+        # link_id와 grid 좌표를 numpy array로 변환
+        link_ids = np.array(list(self.link_grid_coords.keys()))
+        grid_coords = np.array(list(self.link_grid_coords.values()))
         
-        # 0이 아닌 값들만 확인
-        non_zero_rn1 = data[data['RN1'] > 0]
-        if len(non_zero_rn1) > 0:
-            print("\n0이 아닌 RN1 값들:")
-            print(non_zero_rn1['RN1'].describe())
+        with h5py.File(filepath, 'w') as f:
+            f.create_dataset('link_ids', data=link_ids.astype(np.float32))
+            f.create_dataset('grid_coords', data=grid_coords)
+            f.attrs['creation_date'] = datetime.now().isoformat()
+        
+        print(f"격자 매핑이 저장됨: {filepath}")
+    
+    def open_grid_mapping(self, links_gdf):
+        """저장된 격자 매핑 파일 열기"""
+        filename = self.generate_cache_filename(links_gdf)
+        filepath = os.path.join(self.cache_dir, filename)
+        
+        if os.path.exists(filepath):
+            try:
+                self.mapping_file = h5py.File(filepath, 'r')
+                self.link_ids = self.mapping_file['link_ids'][:]
+                self.grid_coords = self.mapping_file['grid_coords'][:]
+                self.link_grid_coords = dict(zip(self.link_ids, map(tuple, self.grid_coords)))
+                print(f"격자 매핑 파일을 열음: {filepath}")
+                return True
+            except Exception as e:
+                print(f"격자 매핑 파일 열기 실패: {e}")
+                self.close_grid_mapping()
+                return False
+        return False
 
+    def close_grid_mapping(self):
+        """격자 매핑 파일 닫기 및 리소스 정리"""
+        if self.mapping_file is not None:
+            try:
+                self.mapping_file.close()
+            except Exception as e:
+                print(f"격자 매핑 파일 닫기 실패: {e}")
+            finally:
+                self.mapping_file = None
+                self.link_ids = None
+                self.grid_coords = None
+    
+    def find_nearest_grid_point(self, nx, ny):
+        """가장 가까운 기상청 격자점 찾기"""
+        point = np.array([nx, ny])
+        distances = np.sqrt(np.sum((self.weather_grid_points - point) ** 2, axis=1))
+        nearest_idx = np.argmin(distances)
+        return tuple(self.weather_grid_points[nearest_idx])
+    
     def convert_to_grid(self, x, y):
         """좌표계 변환 (EPSG:5179 → 기상청 격자)"""
         lon, lat = self.transformer.transform(x, y)
@@ -55,11 +124,32 @@ class WeatherMapper:
         v1 = 0 if lat > 38.0 else (6.0 if lat > 32.0 else 12.0)
         v2 = 0.0 if lon > 126.0 else 6.0
         
-        nx = int(math.floor(((lon - 120.0) * 1.5) + 1 - v2))
-        ny = int(math.floor(((lat - 24.0) * 1.5) + 1 - v1))
+        nx = ((lon - 120.0) * 1.5) + 1 - v2
+        ny = ((lat - 24.0) * 1.5) + 1 - v1
         
         return nx, ny
-    def normalize_weather_data(self,data):
+    
+    def prepare_link_coords(self, links_gdf):
+        """링크별 격자 좌표와 가장 가까운 기상청 격자점 계산"""
+        # 먼저 저장된 매핑 파일 열기 시도
+        if self.open_grid_mapping(links_gdf):
+            return
+        
+        print("저장된 격자 매핑을 찾을 수 없음. 새로운 매핑 계산 중...")
+        
+        if not all(col in links_gdf.columns for col in ['center_x', 'center_y']):
+            links_gdf['center_x'] = links_gdf.geometry.centroid.x
+            links_gdf['center_y'] = links_gdf.geometry.centroid.y
+        
+        for _, row in tqdm(links_gdf.iterrows(), total=len(links_gdf)):
+            nx, ny = self.convert_to_grid(row['center_x'], row['center_y'])
+            nearest_nx, nearest_ny = self.find_nearest_grid_point(nx, ny)
+            self.link_grid_coords[row['LINK_ID']] = (nearest_nx, nearest_ny)
+        
+        # 계산된 매핑 저장
+        self.save_grid_mapping(links_gdf)
+    
+    def normalize_weather_data(self, data):
         """날씨 데이터 정규화"""
         # RN1 정규화 (0~68.5 → 0~1)
         data['RN1'] = data['RN1'] / 68.5
@@ -77,25 +167,6 @@ class WeatherMapper:
         data['PTY'] = data['PTY'].map(pty_mapping).fillna(0.0)
         
         return data
-    def prepare_link_coords(self, links_gdf):
-        """링크별 격자 좌표 미리 계산"""
-        print("링크별 격자 좌표 계산 중...")
-        
-        # 중심점 계산
-        if not all(col in links_gdf.columns for col in ['center_x', 'center_y']):
-            links_gdf['center_x'] = links_gdf.geometry.centroid.x
-            links_gdf['center_y'] = links_gdf.geometry.centroid.y
-        
-        # 각 링크별 격자 좌표 계산
-        for _, row in tqdm(links_gdf.iterrows(), total=len(links_gdf)):
-            nx, ny = self.convert_to_grid(row['center_x'], row['center_y'])
-            self.link_grid_coords[row['LINK_ID']] = (nx, ny)
-            
-    def format_datetime(self, date, time):
-        """날짜/시간 문자열 변환"""
-        date_str = str(date)
-        time_str = str(time).zfill(4)
-        return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]} {time_str[:2]}:{time_str[2:]}:00"
     
     def process_chunk(self, chunk):
         """데이터 청크 처리"""
@@ -105,7 +176,8 @@ class WeatherMapper:
         
         # 날짜/시간별 그룹화
         chunk['datetime_str'] = chunk.apply(
-            lambda x: self.format_datetime(x['Date'], x['Time']), axis=1
+            lambda x: f"{str(x['Date'])[:4]}-{str(x['Date'])[4:6]}-{str(x['Date'])[6:]} {str(x['Time']).zfill(4)[:2]}:{str(x['Time']).zfill(4)[2:]}:00",
+            axis=1
         )
         
         # 각 고유한 시간에 대해
@@ -116,50 +188,35 @@ class WeatherMapper:
             for link_id in chunk.loc[time_mask, 'Link_ID'].unique():
                 if link_id in self.link_grid_coords:
                     nx, ny = self.link_grid_coords[link_id]
+                    
                     try:
-                        weather_data = self.weather_processor.get_weather_data(nx, ny, datetime_str)
-                        if isinstance(weather_data, dict):
+                        # 시간에 대해 전후 데이터 가져오기
+                        before_data = self.weather_processor.get_nearest_before_data(nx, ny, datetime_str)
+                        after_data = self.weather_processor.get_nearest_after_data(nx, ny, datetime_str)
+                        
+                        if before_data or after_data:
+                            # 결과 저장 (가장 가까운 시간의 데이터 사용)
+                            weather_data = before_data if before_data else after_data
                             mask = time_mask & (chunk['Link_ID'] == link_id)
                             chunk.loc[mask, 'PTY'] = weather_data['PTY']
                             chunk.loc[mask, 'RN1'] = weather_data['RN1']
+                            
                     except Exception as e:
                         continue
+        
         chunk = self.normalize_weather_data(chunk)
         return chunk.drop('datetime_str', axis=1)
     
     def add_weather_info(self, data, links_gdf, output_path=None, save_interval=None):
-        """
-        전체 데이터에 날씨 정보 추가
-        
-        Parameters:
-        -----------
-        data : pandas.DataFrame
-            처리할 교통 데이터
-        links_gdf : GeoDataFrame
-            링크 정보가 있는 GeoDataFrame
-        output_path : str, optional
-            중간 결과를 저장할 경로
-        save_interval : int, optional
-            몇 개의 청크마다 저장할지 지정
-            
-        Returns:
-        --------
-        pandas.DataFrame
-            날씨 정보가 추가된 데이터프레임
-        """
-        # 링크 좌표 미리 계산
+        """전체 데이터에 날씨 정보 추가"""
         if not self.link_grid_coords:
             self.prepare_link_coords(links_gdf)
         
         total_chunks = len(data) // self.chunk_size + (1 if len(data) % self.chunk_size else 0)
         processed_chunks = []
         
-        print(f"\n전체 데이터 크기: {len(data):,}행")
-        print(f"청크 크기: {self.chunk_size:,}행")
-        print(f"총 청크 수: {total_chunks:,}개")
-        
         try:
-            for i in tqdm(range(total_chunks), desc="청크 처리 중"):
+            for i in range(total_chunks):
                 start_idx = i * self.chunk_size
                 end_idx = min((i + 1) * self.chunk_size, len(data))
                 chunk = data.iloc[start_idx:end_idx]
@@ -170,25 +227,33 @@ class WeatherMapper:
                 # 중간 저장
                 if output_path and save_interval and (i + 1) % save_interval == 0:
                     temp_df = pd.concat(processed_chunks, ignore_index=True)
-                    temp_path = f"{output_path}_temp_{i+1}.parquet"
-                    temp_df.to_parquet(temp_path)
-                    processed_chunks = []  # 메모리 해제
-                    print(f"\n중간 결과 저장됨: {temp_path}")
+                    temp_path = f"{output_path}_temp_{i+1}.h5"
+                    
+                    with h5py.File(temp_path, 'w') as f:
+                        for col in temp_df.columns:
+                            f.create_dataset(col, data=temp_df[col].values)
+                    
+                    processed_chunks = []
         
         except KeyboardInterrupt:
-            print("\n처리가 중단되었습니다. 지금까지 처리된 데이터를 반환합니다.")
+            print("\n처리가 중단되었습니다.")
         
         if processed_chunks:
             final_df = pd.concat(processed_chunks, ignore_index=True)
             
             if output_path:
-                final_df.to_parquet(f"{output_path}_final.parquet")
-                print(f"\n최종 결과 저장됨: {output_path}_final.parquet")
+                final_path = f"{output_path}_final.h5"
+                with h5py.File(final_path, 'w') as f:
+                    for col in final_df.columns:
+                        f.create_dataset(col, data=final_df[col].values)
             
             return final_df
         
         return None
 
+    def __del__(self):
+        """소멸자: 열린 파일 핸들러 정리"""
+        self.close_grid_mapping()
 
 
 
@@ -200,151 +265,119 @@ class WeatherMapper:
 
 class WeatherDataProcessor:
     def __init__(self):
-        self.interpolators = {}
-        
-    def load_and_combine_csv(self, file_paths):
-        """CSV 파일들을 불러와서 결합하고 정렬"""
-        dfs = [pd.read_csv(path) for path in file_paths]
-        combined_df = pd.concat(dfs, ignore_index=True)
-        
-        # 시간 포맷 통일
-        combined_df['TM'] = pd.to_datetime(combined_df['TM'])
-        
-        # nx, ny 범위 확인 및 정렬 (일반적인 기상청 격자 범위: nx=1~149, ny=1~253)
-        combined_df = combined_df[
-            (combined_df['nx'] >= 1) & (combined_df['nx'] <= 149) &
-            (combined_df['ny'] >= 1) & (combined_df['ny'] <= 253)
-        ]
-        
-        return combined_df.sort_values(['nx', 'ny', 'TM'])
-
-    def convert_and_save_h5(self, df, output_path):
-        """정렬된 데이터를 HDF5 파일로 변환하여 저장"""
-        # 고유값 추출 및 정렬
-        unique_nx = sorted(df['nx'].unique())
-        unique_ny = sorted(df['ny'].unique())
-        unique_time = sorted(df['TM'].unique())
-        
-        nx_size = len(unique_nx)
-        ny_size = len(unique_ny)
-        time_size = len(unique_time)
-        
-        # 5차원 배열 초기화
-        data_array = np.zeros((nx_size, ny_size, time_size, 2), dtype=float)
-        
-        # DataFrame을 피벗하여 빠른 데이터 채우기
-        for var_idx, var_name in enumerate(['PTY', 'RN1']):
-            for time_idx, time in enumerate(unique_time):
-                time_data = df[df['TM'] == time]
-                for _, row in time_data.iterrows():
-                    nx_idx = unique_nx.index(row['nx'])
-                    ny_idx = unique_ny.index(row['ny'])
-                    data_array[nx_idx, ny_idx, time_idx, var_idx] = row[var_name]
-        
-        # HDF5 파일로 저장
-        with h5py.File(output_path, 'w') as h5_file:
-            h5_file.create_dataset('weather_data', data=data_array)
-            h5_file.create_dataset('nx', data=np.array(unique_nx))
-            h5_file.create_dataset('ny', data=np.array(unique_ny))
-            # 시간을 유닉스 타임스탬프로 저장
-            timestamps = np.array([pd.Timestamp(t).timestamp() for t in unique_time])
-            h5_file.create_dataset('time', data=timestamps)
+        """날씨 데이터 처리를 위한 클래스 초기화"""
+        self.weather_data = None
+        self.nx_coords = None
+        self.ny_coords = None
+        self.timestamps = None
+        self.h5_file = None
     
     def load_h5_and_create_interpolator(self, h5_path):
-        """HDF5 파일을 로드하고 interpolator 생성"""
-        with h5py.File(h5_path, 'r') as h5_file:
-            self.weather_data = h5_file['weather_data'][:]
-            self.nx_coords = h5_file['nx'][:]
-            self.ny_coords = h5_file['ny'][:]
-            self.timestamps = h5_file['time'][:]
-            
-            # PTY와 RN1에 대한 interpolator 생성
-            for i, var_name in enumerate(['PTY', 'RN1']):
-                self.interpolators[var_name] = RegularGridInterpolator(
-                    (self.nx_coords, self.ny_coords, self.timestamps),
-                    self.weather_data[:, :, :, i],
-                    method='linear',
-                    bounds_error=False,
-                    fill_value=None
-                )
-    
-    def get_weather_data(self, nx, ny, datetime_str):
-        """주어진 좌표와 시간에 대한 기상 데이터 보간값 반환"""
+        """HDF5 파일 로드 및 데이터 준비
+        
+        Args:
+            h5_path (str): 날씨 데이터가 저장된 H5 파일 경로
+        """
         try:
-            # 시간 문자열을 타임스탬프로 변환
-            timestamp = pd.Timestamp(datetime_str).timestamp()
+            self.h5_file = h5py.File(h5_path, 'r')
+            self.weather_data = self.h5_file['weather_data']
+            self.nx_coords = self.h5_file['nx'][:]
+            self.ny_coords = self.h5_file['ny'][:]
+            self.timestamps = self.h5_file['time'][:]
+            print(f"날씨 데이터 로드 완료: nx 범위 [{min(self.nx_coords)}-{max(self.nx_coords)}], "
+                  f"ny 범위 [{min(self.ny_coords)}-{max(self.ny_coords)}]")
+        except Exception as e:
+            raise RuntimeError(f"날씨 데이터 로드 실패: {str(e)}")
+    
+    def __del__(self):
+        """소멸자: H5 파일 핸들러 정리"""
+        if self.h5_file is not None:
+            try:
+                self.h5_file.close()
+            except Exception as e:
+                print(f"H5 파일 닫기 실패: {str(e)}")
+    
+    def find_grid_indices(self, nx, ny):
+        """격자점의 인덱스 찾기"""
+        if self.weather_data is None:
+            raise RuntimeError("날씨 데이터가 로드되지 않았습니다.")
+        
+        try:
+            nx_idx = np.where(self.nx_coords == int(round(nx)))[0]
+            ny_idx = np.where(self.ny_coords == int(round(ny)))[0]
             
-            # 입력값이 범위 내에 있는지 확인
-            if (nx < min(self.nx_coords) or nx > max(self.nx_coords) or
-                ny < min(self.ny_coords) or ny > max(self.ny_coords) or
-                timestamp < min(self.timestamps) or timestamp > max(self.timestamps)):
-                raise ValueError("입력된 좌표 또는 시간이 데이터 범위를 벗어났습니다.")
+            if len(nx_idx) == 0 or len(ny_idx) == 0:
+                return None, None
             
-            # 보간 수행
-            point = np.array([nx, ny, timestamp])
-            pty = float(self.interpolators['PTY'](point))
-            rn1 = float(self.interpolators['RN1'](point))
+            return nx_idx[0], ny_idx[0]
+        except Exception:
+            return None, None
+    
+    def get_nearest_before_data(self, nx, ny, datetime_str):
+        """주어진 시간 이전의 가장 가까운 데이터 찾기"""
+        if self.weather_data is None:
+            raise RuntimeError("날씨 데이터가 로드되지 않았습니다.")
+        
+        nx_idx, ny_idx = self.find_grid_indices(nx, ny)
+        if nx_idx is None or ny_idx is None:
+            return None
+        
+        try:
+            target_timestamp = pd.Timestamp(datetime_str).timestamp()
+            before_idx = np.searchsorted(self.timestamps, target_timestamp) - 1
+            
+            if before_idx < 0:
+                return None
             
             return {
-                'PTY': round(pty, 1),
-                'RN1': round(rn1, 1)
+                'time': datetime.fromtimestamp(self.timestamps[before_idx]).strftime('%Y-%m-%d %H:%M:%S'),
+                'PTY': float(self.weather_data[nx_idx, ny_idx, before_idx, 0]),
+                'RN1': float(self.weather_data[nx_idx, ny_idx, before_idx, 1])
             }
+        except Exception:
+            return None
+    
+    def get_nearest_after_data(self, nx, ny, datetime_str):
+        """주어진 시간 이후의 가장 가까운 데이터 찾기"""
+        if self.weather_data is None:
+            raise RuntimeError("날씨 데이터가 로드되지 않았습니다.")
+        
+        nx_idx, ny_idx = self.find_grid_indices(nx, ny)
+        if nx_idx is None or ny_idx is None:
+            return None
+        
+        try:
+            target_timestamp = pd.Timestamp(datetime_str).timestamp()
+            after_idx = np.searchsorted(self.timestamps, target_timestamp)
             
-        except Exception as e:
-            return f"에러 발생: {str(e)}"
+            if after_idx >= len(self.timestamps):
+                return None
+            
+            return {
+                'time': datetime.fromtimestamp(self.timestamps[after_idx]).strftime('%Y-%m-%d %H:%M:%S'),
+                'PTY': float(self.weather_data[nx_idx, ny_idx, after_idx, 0]),
+                'RN1': float(self.weather_data[nx_idx, ny_idx, after_idx, 1])
+            }
+        except Exception:
+            return None
+    
+    def get_data_range_info(self):
+        """데이터의 시간 및 좌표 범위 정보 반환"""
+        if self.weather_data is None:
+            raise RuntimeError("날씨 데이터가 로드되지 않았습니다.")
         
-    def get_max_rn1(self):
-        """전체 기간의 RN1 최대값 반환"""
-        return np.max(self.weather_data[:, :, :, 1])  # RN1은 인덱스 1
-
-    def analyze_rn1(self):
-        """전체 기간의 RN1 분석 정보 반환"""
-        rn1_data = self.weather_data[:, :, :, 1]  # RN1은 인덱스 1
-        max_val = np.max(rn1_data)
-        
-        # 최대값 위치 찾기
-        max_indices = np.where(rn1_data == max_val)
-        nx_idx, ny_idx, time_idx = max_indices[0][0], max_indices[1][0], max_indices[2][0]
-        
-        # 실제 좌표값과 시간 가져오기
-        max_nx = self.nx_coords[nx_idx]
-        max_ny = self.ny_coords[ny_idx]
-        max_time = datetime.fromtimestamp(self.timestamps[time_idx])
+        start_time = datetime.fromtimestamp(self.timestamps[0])
+        end_time = datetime.fromtimestamp(self.timestamps[-1])
         
         return {
-            'max_value': float(max_val),
-            'location': (float(max_nx), float(max_ny)),
-            'datetime': max_time.strftime('%Y-%m-%d %H:%M:%S')
+            'time_range': (start_time, end_time),
+            'nx_range': (int(min(self.nx_coords)), int(max(self.nx_coords))),
+            'ny_range': (int(min(self.ny_coords)), int(max(self.ny_coords))),
+            'pty_range': (float(np.min(self.weather_data[:,:,:,0])), 
+                         float(np.max(self.weather_data[:,:,:,0]))),
+            'rn1_range': (float(np.min(self.weather_data[:,:,:,1])), 
+                         float(np.max(self.weather_data[:,:,:,1])))
         }
-
-
-
-def run_performance_test():
-    """성능 테스트를 위한 함수"""
-    import time
-    from datetime import datetime, timedelta
-    import random
-    
-    # 테스트 설정
-    n_queries = 1000  # 테스트할 쿼리 수
-    
-    # 테스트 데이터 생성
-    nx_range = (57, 63)
-    ny_range = (125, 127)
-    start_date = datetime(2023, 9, 1)
-    end_date = datetime(2024, 12, 31)
-    
-    # 랜덤 쿼리 생성
-    test_queries = []
-    for _ in range(n_queries):
-        random_nx = random.uniform(nx_range[0], nx_range[1])
-        random_ny = random.uniform(ny_range[0], ny_range[1])
-        random_days = random.randint(0, (end_date - start_date).days)
-        random_minutes = random.randint(0, 24*60-1)
-        random_time = start_date + timedelta(days=random_days, minutes=random_minutes)
-        test_queries.append((random_nx, random_ny, random_time.strftime('%Y-%m-%d %H:%M:%S')))
-    
-    return test_queries
 
 
 
@@ -382,30 +415,19 @@ def main():
     
     # 쿼리 성능 테스트
     print("\n=== 쿼리 성능 테스트 ===")
-    test_queries = run_performance_test()
+
     
     # 단일 쿼리 테스트
-    test_nx, test_ny, test_time = test_queries[0]
+
     start_time = time.time()
-    result = processor.get_weather_data(test_nx, test_ny, test_time)
+
     single_query_time = time.time() - start_time
     
     print(f"\n단일 쿼리 테스트:")
-    print(f"좌표 ({test_nx:.1f}, {test_ny:.1f})와 시간 {test_time}의 보간 결과:")
-    print(f"결과: {result}")
+
     print(f"소요 시간: {single_query_time*1000:.2f}ms")
     
-    # 벌크 쿼리 테스트
-    print(f"\n벌크 쿼리 테스트 (총 {len(test_queries)}개 쿼리):")
-    start_time = time.time()
-    for nx, ny, time_str in test_queries:
-        processor.get_weather_data(nx, ny, time_str)
-    bulk_query_time = time.time() - start_time
-    
-    print(f"총 소요 시간: {bulk_query_time:.2f}초")
-    print(f"쿼리당 평균 시간: {bulk_query_time*1000/len(test_queries):.2f}ms")
 
-if __name__ == "__main__":
     main()
 
 

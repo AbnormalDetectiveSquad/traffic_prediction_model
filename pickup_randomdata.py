@@ -11,6 +11,7 @@ import h5py
 from main_old import get_parameters
 import matplotlib.pyplot as plt 
 import Weather_reform as wr 
+import math
 
 def validate_and_create_pivot_table(combined_data):
     # 중복 데이터 확인
@@ -35,7 +36,7 @@ def validate_and_create_pivot_table(combined_data):
     pivot_data = pivot_data.sort_index()
     
     return pivot_data
-def get_files_list(number,option='non-holidays',start=None, data_dir='/home/ssy/extract_its_data'):
+def get_files_list(number,option='non-holidays',start=None, data_dir='/home/kfe-shim/extract_its_data'):
     # 파일 리스트 가져오기
     all_files = [f for f in os.listdir(data_dir) if f.endswith('_5Min.csv')]
     if option == 'all':
@@ -355,17 +356,35 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
         print(f"Mapping file not found: {mapping_file_path}.")
         # 필요한 경우 맵핑 테이블 생성 로직 추가
         # ...
-    
+    times_order_T = []
+    for hour in range(24):
+        for minute in range(0, 60, 5):
+            times_order_T.append(int(hour * 100 + minute))  # 0000, 0005, 0010, ...
+    time_df = pd.DataFrame({'Time': times_order_T})
+    time_df = add_ptime_column(time_df.copy())
+    print(time_df.head())
     mapping_table = pd.read_csv(mapping_file_path)
     print(f"Loaded mapping table with {len(mapping_table)} entries.")
     link_order = mapping_table.sort_values('Matrix_Index')['Link_ID'].tolist()
     num_columns=len(link_order)
+    
+    # 기본 Time-LinkID 조합 DataFrame 한 번만 생성
+    base_df = pd.DataFrame({
+        'Time': np.repeat(times_order_T, len(link_order)),
+        'Link_ID': np.tile(link_order, len(times_order_T))
+    })
+    base_df = add_ptime_column(base_df.copy())  # Ptime 추가
+    
     # HDF5 파일 열기 (추가 모드)
     featuresmat_h5_path = os.path.join(dataset_path, 'features_matrix.h5')
         # 날씨 처리기 초기화
-    weather_processor = wr.WeatherDataProcessor()
-    weather_processor.load_h5_and_create_interpolator("./Weather/weather_data.h5")
-    weather_mapper = wr.WeatherMapper(weather_processor, chunk_size=500000)
+    try:
+        weather_processor = wr.WeatherDataProcessor()
+        weather_processor.load_h5_and_create_interpolator("./Weather/weather_data.h5")
+        weather_mapper = wr.WeatherMapper(weather_processor, chunk_size=500000)
+        # ... 나머지 작업 수행 ...
+    finally:
+        del weather_processor  # 리
     weather_mapper.prepare_link_coords(links_gdf)
     with h5py.File(featuresmat_h5_path, 'w') as speed_hf:
         # 특성의 개수 (speed와 weight, 총 6개)
@@ -382,117 +401,148 @@ def process_and_save_speed_matrix_chunk_hdf5(data_dir, file_list, dataset_path, 
 
         
         # 배치 크기 설정
-        BATCH_SIZE = 10  # 한 번에 처리할 파일 수
-        
+        BATCH_SIZE = 16  # 한 번에 처리할 파일 수
+        total_batches = math.ceil(len(file_list) / BATCH_SIZE)
         processed_files = []
         
         # 파일을 배치로 나누어 처리
-        for i in tqdm(range(0, len(file_list), BATCH_SIZE), desc=f'Loading data from {data_dir}'):
-            batch_files = file_list[i:i + BATCH_SIZE]
-            batch_data_speed = []
-            batch_data_weight = []
-            batch_data_date=[]
-            batch_data_time=[]
-            batch_data_PTY=[]
-            batch_data_RN1=[]
-            for f in batch_files:
-                file_path = os.path.join(data_dir, f)
+        with tqdm(total=total_batches, desc="Total progress", unit="file") as pbar_total:
+            for i in range(0, len(file_list), BATCH_SIZE):
+                batch_files = file_list[i:i + BATCH_SIZE]
+                batch_data_speed = []
+                batch_data_weight = []
+                batch_data_date=[]
+                batch_data_time=[]
+                batch_data_PTY=[]
+                batch_data_RN1=[]
+                pbar_total.update(1)
+                for f in tqdm(batch_files, desc=f'Loading data from {i}th batch', leave=False, unit="file"):
+                    file_path = os.path.join(data_dir, f)
+                    if not os.path.exists(file_path):
+                        print(f"File not found: {file_path}, skipping.")
+                        continue
+                    
+                    try:
+                        # 파일 로드
+                        data = pd.read_csv(file_path, header=None)
+                        data.columns = ['Date', 'Time', 'Link_ID', 'Some_Column', 'Avg_Speed', 'Other']
+                        date_order = int(f.split('_')[0])
+                        cpM=times_order_T.copy()
+                        time_order = [(date_order, TT) for TT in cpM]
+                        # 필요한 열만 유지 및 정렬
+                        data = data[['Link_ID', 'Date', 'Time', 'Avg_Speed']].copy()
+                        data = data.sort_values(by=['Date', 'Time'])
+                        data=add_ptime_column(data)
+                        data=add_pdate_column(data)
+                        time_df = base_df.copy()
+                        time_df['Date'] = int(f.split('_')[0])
+                        # 데이터 변환
+                        pivot_speed_p = data.pivot_table(
+                            index=['Date', 'Time'], 
+                            columns='Link_ID', 
+                            values='Avg_Speed', 
+                            aggfunc='mean',
+                            fill_value=0
+                        ).reindex(columns=link_order, fill_value=0).reindex(index=time_order,columns=link_order, fill_value= np.nan)
+                        pivot_speed_interpolated = pivot_speed_p.interpolate(method='linear', axis=0)
+                        pivot_speed = pivot_speed_interpolated
+                        if bool(np.isnan(pivot_speed).any().any()):
+                            nan_count = np.isnan(pivot_speed).sum()
+                            pivot_speed = pivot_speed.fillna(0)
+                            raise ValueError(f"NaN values found in speed matrix. Total NaN count: {nan_count}")
+                        
+                        
+                        data = weather_mapper.add_weather_info(data, links_gdf)
+                        combined_batch = data.copy()
+                        combined_batch['CDate'] = pd.to_datetime(combined_batch['Date'].astype(str), format='%Y%m%d')
+                        combined_batch['Weight'] = calculate_weight_vectorized(combined_batch['CDate'])
+
+                        pivot_weight = combined_batch.pivot_table(
+                            index=['Date', 'Time'],
+                            columns='Link_ID',
+                            values='Weight',
+                            aggfunc='mean',
+                            fill_value=combined_batch['Weight'][0]
+                        ).reindex(columns=link_order, fill_value=combined_batch['Weight'][0]).reindex(index=time_order,columns=link_order, fill_value=combined_batch['Weight'][0])
+
+                        
+                        pivot_date = combined_batch.pivot_table(
+                            index=['Date', 'Time'],
+                            columns='Link_ID',
+                            values='Pdate',
+                            aggfunc='mean',
+                            fill_value=combined_batch['Pdate'][0]
+                        ).reindex(columns=link_order, fill_value=combined_batch['Pdate'][0]).reindex(index=time_order,columns=link_order, fill_value=combined_batch['Pdate'][0])
+
+                        pivot_time = time_df.pivot_table(
+                            index=['Date', 'Time'], 
+                            columns='Link_ID',
+                            values='Ptime',
+                            aggfunc='mean'
+                        ).reindex(index=time_order,columns=link_order)
+
+                        pivot_PTY_p = combined_batch.pivot_table(
+                            index=['Date', 'Time'],
+                            columns='Link_ID',
+                            values='PTY',
+                            aggfunc='mean',
+                            fill_value=0
+                        ).reindex(columns=link_order, fill_value=0).reindex(index=time_order,columns=link_order, fill_value= np.nan)
+                        pivot_PTY_interpolated = pivot_PTY_p.interpolate(method='linear', axis=0)
+                        pivot_PTY = pivot_PTY_interpolated
+                        if bool(np.isnan(pivot_PTY).any().any()):
+                            nan_count = np.isnan(pivot_PTY).sum()
+                            pivot_PTY = pivot_PTY.fillna(0)
+                            raise ValueError(f"NaN values found in PTY matrix. Total NaN count: {nan_count}")
+                        
+                        
+                        pivot_RN1_p = combined_batch.pivot_table(
+                            index=['Date', 'Time'],
+                            columns='Link_ID',
+                            values='RN1',
+                            aggfunc='mean',
+                            fill_value=0
+                        ).reindex(columns=link_order, fill_value=0).reindex(index=time_order,columns=link_order, fill_value= np.nan)
+                        pivot_RN1_interpolated = pivot_RN1_p.interpolate(method='linear', axis=0)
+                        pivot_RN1 = pivot_RN1_interpolated
+                        if bool(np.isnan(pivot_RN1).any().any()):
+                            nan_count = np.isnan(pivot_RN1).sum()
+                            pivot_RN1 = pivot_RN1.fillna(0)
+                            raise ValueError(f"NaN values found in RN1 matrix. Total NaN count: {nan_count}")
+                        
+                        
+                        
+                        batch_data_speed.append(pivot_speed.to_numpy(dtype='float32'))
+                        batch_data_weight.append(pivot_weight.to_numpy(dtype='float32'))
+                        batch_data_date.append(pivot_date.to_numpy(dtype='float32'))
+                        batch_data_time.append(pivot_time.to_numpy(dtype='float32'))
+                        batch_data_PTY.append(pivot_PTY.to_numpy(dtype='float32'))
+                        batch_data_RN1.append(pivot_RN1.to_numpy(dtype='float32'))
+                        processed_files.append(f)
+                        
+                    except Exception as e:
+                        print(f"Error processing file {f}: {str(e)}")
+                        continue
+                    
                 
-                if not os.path.exists(file_path):
-                    print(f"File not found: {file_path}, skipping.")
+                if not batch_data_speed or not batch_data_weight:
                     continue
                 
-                try:
-                    # 파일 로드
-                    data = pd.read_csv(file_path, header=None)
-                    data.columns = ['Date', 'Time', 'Link_ID', 'Some_Column', 'Avg_Speed', 'Other']
-                    
-                    # 필요한 열만 유지 및 정렬
-                    data = data[['Link_ID', 'Date', 'Time', 'Avg_Speed']]
-                    data = data.sort_values(by=['Date', 'Time'])
-                    data=add_ptime_column(data)
-                    data=add_pdate_column(data)
-                    
-                    
-                    # 데이터 변환
-                    pivot_speed = data.pivot_table(
-                        index=['Date', 'Time'], 
-                        columns='Link_ID', 
-                        values='Avg_Speed', 
-                        aggfunc='mean',
-                        fill_value=0
-                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
-
-                    data = weather_mapper.add_weather_info(data, links_gdf)
-                    combined_batch = data.copy()
-                    combined_batch['Date'] = pd.to_datetime(combined_batch['Date'].astype(str), format='%Y%m%d')
-                    combined_batch['Weight'] = calculate_weight_vectorized(combined_batch['Date'])
-
-                    pivot_weight = combined_batch.pivot_table(
-                        index=['Date', 'Time'],
-                        columns='Link_ID',
-                        values='Weight',
-                        aggfunc='mean',
-                        fill_value=0
-                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
-                    pivot_date = combined_batch.pivot_table(
-                        index=['Date', 'Time'],
-                        columns='Link_ID',
-                        values='Pdate',
-                        aggfunc='mean',
-                        fill_value=0
-                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
-                    pivot_time = combined_batch.pivot_table(
-                        index=['Date', 'Time'],
-                        columns='Link_ID',
-                        values='Ptime',
-                        aggfunc='mean',
-                        fill_value=0
-                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
-                    pivot_PTY = combined_batch.pivot_table(
-                        index=['Date', 'Time'],
-                        columns='Link_ID',
-                        values='PTY',
-                        aggfunc='mean',
-                        fill_value=0
-                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
-                    pivot_RN1 = combined_batch.pivot_table(
-                        index=['Date', 'Time'],
-                        columns='Link_ID',
-                        values='RN1',
-                        aggfunc='mean',
-                        fill_value=0
-                    ).reindex(columns=link_order, fill_value=0).to_numpy(dtype='float32')
-                    
-                    batch_data_speed.append(pivot_speed)
-                    batch_data_weight.append(pivot_weight)
-                    batch_data_date.append(pivot_date)
-                    batch_data_time.append(pivot_time)
-                    batch_data_PTY.append(pivot_PTY)
-                    batch_data_RN1.append(pivot_RN1)
-                    processed_files.append(f)
-                except Exception as e:
-                    print(f"Error processing file {f}: {str(e)}")
-                    continue
-            
-            if not batch_data_speed or not batch_data_weight:
-                continue
-            
-            # 배치 데이터 준비
-            batch_speed_array = np.expand_dims(np.vstack(batch_data_speed), axis=0)  # [1, 시간, 노드]
-            batch_weight_array = np.expand_dims(np.vstack(batch_data_weight), axis=0)  # [1, 시간, 노드]
-            batch_date_array= np.expand_dims(np.vstack(batch_data_date), axis=0)
-            batch_time_array= np.expand_dims(np.vstack(batch_data_time), axis=0)
-            batch_PTY_array= np.expand_dims(np.vstack(batch_data_PTY), axis=0)
-            batch_RN1_array= np.expand_dims(np.vstack(batch_data_RN1), axis=0)
-            batch_feature_array = np.concatenate([batch_speed_array, batch_weight_array,batch_date_array,batch_time_array,batch_PTY_array,batch_RN1_array], axis=0)  # [2, 시간, 노드]            
-            current_time_rows = feature_dataset.shape[1]
-            new_time_rows = batch_feature_array.shape[1]
-            feature_dataset.resize((num_features, current_time_rows + new_time_rows, feature_dataset.shape[2]))
-            feature_dataset[:, current_time_rows:current_time_rows + new_time_rows, :] = batch_feature_array
-            
-            # 메모리 정리
-            del batch_data_speed, batch_data_weight, batch_speed_array, batch_weight_array
+                # 배치 데이터 준비
+                batch_speed_array = np.expand_dims(np.vstack(batch_data_speed), axis=0)  # [1, 시간, 노드]
+                batch_weight_array = np.expand_dims(np.vstack(batch_data_weight), axis=0)  # [1, 시간, 노드]
+                batch_date_array= np.expand_dims(np.vstack(batch_data_date), axis=0)
+                batch_time_array= np.expand_dims(np.vstack(batch_data_time), axis=0)
+                batch_PTY_array= np.expand_dims(np.vstack(batch_data_PTY), axis=0)
+                batch_RN1_array= np.expand_dims(np.vstack(batch_data_RN1), axis=0)
+                batch_feature_array = np.concatenate([batch_speed_array, batch_weight_array,batch_date_array,batch_time_array,batch_PTY_array,batch_RN1_array], axis=0)  # [2, 시간, 노드]            
+                current_time_rows = feature_dataset.shape[1]
+                new_time_rows = batch_feature_array.shape[1]
+                feature_dataset.resize((num_features, current_time_rows + new_time_rows, feature_dataset.shape[2]))
+                feature_dataset[:, current_time_rows:current_time_rows + new_time_rows, :] = batch_feature_array
+                
+                # 메모리 정리
+                del batch_data_speed, batch_data_weight, batch_speed_array, batch_weight_array
         
         # 처리된 파일 목록 저장
         file_list_path = os.path.join(dataset_path, 'processed_files.txt')
@@ -558,8 +608,8 @@ def calculate_weight_vectorized(dates):
     return weights
 
 
-file=get_files_list(10,option='sequential',start='20230901')
-data_dir='/home/ssy/extract_its_data'
+file=get_files_list(400,option='sequential',start='20230901')
+data_dir='/home/kfe-shim/extract_its_data'
 path=os.path.join(data_dir,file[0])
 data=pd.read_csv(path,header=None)
 dataset_path_new='./data/seoul'
