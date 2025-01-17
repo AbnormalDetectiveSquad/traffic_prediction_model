@@ -22,7 +22,7 @@ import os
 wandbonoff = True
 globaln = 0
 # wandb online 모드 설정
-os.environ['WANDB_MODE'] = 'offline'
+os.environ['WANDB_MODE'] = 'online'
 log_queue = queue.Queue()
 #import nni
 def wandb_log_safe(data):
@@ -83,7 +83,7 @@ def get_parameters(config=None):
     
     
     
-    parser.add_argument('--epochs', type=int, default=10, help='epochs, default as 1000')
+    parser.add_argument('--epochs', type=int, default=50, help='epochs, default as 1000')
     parser.add_argument('--opt', type=str, default='adamw', choices=['adamw', 'nadamw', 'lion'], help='optimizer, default as nadamw')
     parser.add_argument('--step_size', type=int, default=18)
     parser.add_argument('--gamma', type=float, default=0.871287183007703)
@@ -94,7 +94,7 @@ def get_parameters(config=None):
     parser.add_argument('--complexity', type=int, default=2, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
-    parser.add_argument('--fname', type=str, default=f'S400samp_seq_wandb_scan{globaln}th_64batchfix', help='name')
+    parser.add_argument('--fname', type=str, default=f'S400samp_scan{globaln}th_2batch', help='name')
     parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
@@ -396,7 +396,7 @@ def setup_sweep():
             #"complexity": {"values": [2,4,8]},
         },
         }
-    sweep_id = wandb.sweep(sweep_config, project="traffic_prediction_4090_project")
+    sweep_id = wandb.sweep(sweep_config, project="normalize_fix_project_4070ti")
     return sweep_id
 
 def main(config=None):#wandb sweep
