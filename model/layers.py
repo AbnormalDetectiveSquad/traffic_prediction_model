@@ -104,10 +104,19 @@ class TemporalConvLayer(nn.Module):
                 # The provided code snippet, (x_p + x_in) ⊙ sigmoid(x_q), is an example of GLU operation. 
                 x = torch.mul((x_p + x_in), torch.sigmoid(x_q))
 
+            
+
+                # ReLU 적용
+                #x = torch.mul(F.relu(x_p + x_in), F.leaky_relu(x_q))
+                # Leaky ReLU 적용
+                #x = torch.mul(F.leaky_relu(x_p + x_in), F.leaky_relu(x_q))
+                # ELU 적용
+                #x = torch.mul(F.elu(x_p + x_in), F.leaky_relu(x_q))
+                # tanh 적용 (출력 범위 조절 목적)
+                #x = torch.mul(torch.tanh(x_p + x_in), F.leaky_relu(x_q))
             else:
                 # tanh(x_p + x_in) ⊙ sigmoid(x_q)
                 x = torch.mul(torch.tanh(x_p + x_in), torch.sigmoid(x_q))
-
         elif self.act_func == 'relu':
             x = self.relu(x_causal_conv + x_in)
 

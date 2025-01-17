@@ -71,15 +71,15 @@ def get_parameters(config=None):
     parser.add_argument('--droprate', type=float, default=0.11934253064493432)
 
 
-    parser.add_argument('--lr', type=float, default=0.005500530762294727, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.0005500530762294727, help='learning rate')
     
 
 
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=32)
 
 
 
-    parser.add_argument('--weight_decay_rate', type=float, default=0.015042254587113923, help='weight decay (L2 penalty)')
+    parser.add_argument('--weight_decay_rate', type=float, default=0.055042254587113923, help='weight decay (L2 penalty)')
     
     
     
@@ -91,11 +91,11 @@ def get_parameters(config=None):
     parser.add_argument('--k_threshold', type=float, default=430.6227347591174, help='adjacency_matrix threshold parameter menual setting')
 
 
-    parser.add_argument('--complexity', type=int, default=36, help='number of bottleneck chnnal | in paper value is 16')
+    parser.add_argument('--complexity', type=int, default=18, help='number of bottleneck chnnal | in paper value is 16')
   
     parser.add_argument('--features', type=int, default='6', help='number of features')
-    parser.add_argument('--fname', type=str, default=f'prerun', help='name')
-    parser.add_argument('--mode', type=str, default='train', help='test or train')
+    parser.add_argument('--fname', type=str, default=f'run_num_3', help='name')
+    parser.add_argument('--mode', type=str, default='test', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
@@ -277,6 +277,9 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,star
                 #torch.cuda.empty_cache() 
         scheduler.step()
         val_loss = val(model, val_iter,loss)
+        if (not np.isfinite(l_sum / n)) or (not np.isfinite(val_loss)):
+            print("Nan Error")
+            break
         # GPU memory usage
         gpu_mem_alloc = torch.cuda.max_memory_allocated() / 1000000 if torch.cuda.is_available() else 0
         print('Epoch: {:03d} | Lr: {:.20f} |Train loss: {:.6f} | Val loss: {:.6f} | GPU occupy: {:.6f} MiB'.\
@@ -299,10 +302,10 @@ def train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,star
             "epoch": epoch,
             "GPU occupy" : gpu_mem_alloc
             })
-       
-        if es.early_stop:
-            print("Early stopping")
-            break
+        if (np.isfinite(l_sum / n)) and (np.isfinite(val_loss)):       
+            if es.early_stop:
+                print("Early stopping")
+                break
         train_iter.reboot()
         val_iter.reboot()
     while not log_queue.empty():
