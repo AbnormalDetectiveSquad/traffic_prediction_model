@@ -295,7 +295,7 @@ class FileManager:
             if not self.featuresmat.id.valid:
                 self.featuresmat = h5py.File(self.filepath, "r")
              # features_matrix에서 데이터 읽기
-            data = self.featuresmat['features_matrix'][:, start_pos:end_pos, :]  # [특성, 시간, 노드]
+            data = self.featuresmat['features_matrix'][0:self.args.features, start_pos:end_pos, :]  # [특성, 시간, 노드]
 
             # 배치별로 데이터 만들기
             Result_x = np.zeros([self.args.batch_size, self.args.features, self.args.n_his, self.width])
@@ -324,7 +324,7 @@ class FileManager:
             print(f"y_sol shape: {data.shape if 'data' in locals() else 'not created'}")
             print(f"Result_y shape: {Result_y.shape}")
             raise e
-    
+        
         return torch.tensor(Result_x, dtype=torch.float16).to(self.device), torch.tensor(Result_y, dtype=torch.float16).to(self.device)
 
 def delete_if_exists(path):

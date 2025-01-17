@@ -19,6 +19,7 @@ import wandb
 import threading
 import queue
 import os
+import time
 wandbonoff = False
 globaln = 0
 # wandb online 모드 설정
@@ -47,7 +48,7 @@ def set_env(seed):
     torch.backends.cudnn.deterministic = True
     # torch.use_deterministic_algorithms(True)  
 def get_parameters(config=None):
-    global globaln
+    global globaln, wandbonoff
     parser = argparse.ArgumentParser(description='STGCN')
     parser.add_argument('--enable_cuda', type=bool, default=True, help='enable CUDA, default as True')
     parser.add_argument('--seed', type=int, default=42, help='set the random seed for stabilizing experiment results')
@@ -93,18 +94,28 @@ def get_parameters(config=None):
 
     parser.add_argument('--complexity', type=int, default=18, help='number of bottleneck chnnal | in paper value is 16')
   
-    parser.add_argument('--features', type=int, default='6', help='number of features')
+    parser.add_argument('--features', type=int, default='4', help='number of features')
     parser.add_argument('--fname', type=str, default=f'run_num_3', help='name')
-    parser.add_argument('--mode', type=str, default='test', help='test or train')
+    parser.add_argument('--mode', type=str, default='train', help='test or train')
     parser.add_argument('--HotEncoding', type=str, default="On", help='On or Off')
     parser.add_argument('--Continue', type=str, default="False", help='True or False')
     args = parser.parse_args()
 
     if config:
-        for key, value in config.items():
-            setattr(args, key, value)
-
-
+        if wandbonoff:
+            for key, value in config.items():
+                setattr(args, key, value)
+        else:
+            args.features=int(config.features)
+            args.fname=f'run_num_{globaln}_{config.features}'
+            print(f'{args.features},{args.fname}')
+            print('3')
+            time.sleep(1)
+            print('2')
+            time.sleep(1)
+            print('1')
+            time.sleep(1)
+            print('Start')
     # For stable experiment results
     set_env(args.seed)
     #args.batch_size = int(2048/args.complexity)
@@ -451,14 +462,44 @@ def main3():#wandb on
     train_iter.file_manager.__del__()
     test(zscore, loss, model, test_iter, args,device)
     test_iter.file_manager.__del__()
+def main4(config=None):#test low channal
+    global globaln
+    
+    args, device, blocks = get_parameters(config)
+    mat_path = f"./data/{args.dataset}/features_matrix.h5"
+    data, args, n_vertex,zscore,train_iter,val_iter,test_iter =setup_preprocess(args,mat_path,device)
+    loss, es, model, optimizer, scheduler,start_epoch, best_val_loss = setup_model(args, blocks, n_vertex,device)
+    x,y=data.read_chunk_training_batch(0)
+    print(x.shape,y.shape)
+    if args.mode == 'train':
+        train(args, model, loss, optimizer, scheduler, es, train_iter, val_iter,start_epoch, best_val_loss)
+    val_iter.file_manager.__del__()
+    train_iter.file_manager.__del__()
+    test(zscore, loss, model, test_iter, args,device)
+    test_iter.file_manager.__del__()
+    
+    
+    globaln+=1
+    
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
+    config=argparse.ArgumentParser(description='configset')
+    looparr=np.array([int(5),int(4),int(3),int(4),int(2)])
+    for i in range(len(looparr)):
+        config.features=looparr[i]
+        print(f'{config.features},{config.features.dtype}')
+        main4(config)
+    print('Finish!!!!!!!!!!!!')
+    
+'''
     if wandbonoff:
         sweep_id = setup_sweep()
         wandb.agent(sweep_id, function=main)
         wandb.finish()
     else:
         main2()
+'''            
+    
